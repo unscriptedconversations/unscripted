@@ -1,314 +1,232 @@
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
-import { FIGURES, getFigure } from '../lib/figures'
 import Logo from '../components/Logo'
-import Tag from '../components/Tag'
 
-function timeAgo(date) {
-  const s = Math.floor((Date.now() - new Date(date)) / 1000)
-  if (s < 60) return 'now'
-  if (s < 3600) return Math.floor(s / 60) + 'm'
-  if (s < 86400) return Math.floor(s / 3600) + 'h'
-  return Math.floor(s / 86400) + 'd'
-}
-
-function progressColor(pct) {
-  if (pct >= 80) return '#5E7A62'
-  if (pct >= 50) return '#7A9A7E'
-  if (pct >= 25) return '#C27A5A'
-  return '#B0A594'
-}
-
-function MemberAvatar({ member, size = 36 }) {
-  const fig = member.avatar_figure ? getFigure(member.avatar_figure) : null
-  if (fig) return <div style={{width:size,height:size,borderRadius:'50%',background:fig.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:size*0.5,flexShrink:0,border:'2px solid rgba(255,255,255,0.15)',cursor:'pointer'}}>{fig.icon}</div>
-  return <div style={{width:size,height:size,borderRadius:'50%',background:member.color||'#8B6E52',display:'flex',alignItems:'center',justifyContent:'center',fontSize:size*0.31,fontWeight:700,fontFamily:'var(--ui)',color:'#FFF',flexShrink:0,border:'2px solid rgba(255,255,255,0.15)',cursor:'pointer'}}>{member.initials||'?'}</div>
-}
-
-function ThemePill({ t, active, onClick }) {
-  return <span onClick={onClick} style={{fontFamily:'var(--ui)',fontSize:10,fontWeight:600,letterSpacing:1,color:active?'var(--tc)':'var(--txM)',background:active?'var(--tcD)':'var(--sf2)',border:'1px solid '+(active?'var(--tc)':'var(--bd)'),borderRadius:100,padding:'4px 14px',cursor:onClick?'pointer':'default'}}>{t}</span>
-}
-
-export default function Home() {
-  const [view, setView] = useState('home')
+export default function Landing() {
+  const router = useRouter()
+  const [clubs, setClubs] = useState([])
   const [books, setBooks] = useState([])
-  const [threads, setThreads] = useState([])
-  const [members, setMembers] = useState([])
-  const [posts, setPosts] = useState([])
-  const [likes, setLikes] = useState([])
-  const [replyCounts, setReplyCounts] = useState({})
-  const [selBook, setSelBook] = useState(null)
-  const [discMode, setDiscMode] = useState('chapters')
-  const [profileMember, setProfileMember] = useState(null)
+  const [q, setQ] = useState('')
+  const [sr, setSR] = useState(null)
   const [currentUser, setCurrentUser] = useState(null)
-  const [newPost, setNewPost] = useState('')
-  const [newSit, setNewSit] = useState('')
-  const [newThemes, setNewThemes] = useState('')
-  const [showReg, setShowReg] = useState(false)
-  const [regData, setRegData] = useState({ first:'', last:'', email:'' })
-  const [regError, setRegError] = useState('')
-  const [regStep, setRegStep] = useState(0)
-  const [selFigure, setSelFigure] = useState(null)
-  const [figCat, setFigCat] = useState('All')
-  const [showEditProfile, setShowEditProfile] = useState(false)
-  const [profileForm, setProfileForm] = useState({ fav_book:'', fav_book_author:'', one_word:'', fav_cartoon:'' })
-  const [filterTheme, setFilterTheme] = useState(null)
-  const [activeThread, setActiveThread] = useState(null)
-  const [activeThreadBook, setActiveThreadBook] = useState(null)
-  const [threadPosts, setThreadPosts] = useState([])
-  const [threadNewPost, setThreadNewPost] = useState('')
-  const [threadNewSit, setThreadNewSit] = useState('')
-  const [threadNewThemes, setThreadNewThemes] = useState('')
-  const [replyingTo, setReplyingTo] = useState(null)
-  const [replyText, setReplyText] = useState('')
-  const [expandedReplies, setExpandedReplies] = useState({})
-  const [threadLikes, setThreadLikes] = useState({})
-  const [vis, setVis] = useState(false)
 
   useEffect(() => {
     loadData()
-    setTimeout(() => setVis(true), 60)
     try { const sv = window.localStorage?.getItem?.('unscripted_user'); if (sv) setCurrentUser(JSON.parse(sv)) } catch(e) {}
   }, [])
 
   async function loadData() {
-    const [bR,mR,pR,tR,lR,rR] = await Promise.all([
-      supabase.from('books').select('*').order('display_order'),
-      supabase.from('members').select('*').order('created_at'),
-      supabase.from('posts').select('*, member:members(*)').order('created_at', { ascending: false }),
-      supabase.from('threads').select('*').order('chapter_number'),
-      supabase.from('likes').select('*'),
-      supabase.from('post_replies').select('post_id'),
+    const [cR, bR] = await Promise.all([
+      supabase.from('clubs').select('*, club_members(count), books(title, author, status)'),
+      supabase.from('books').select('*, club:clubs(name)').order('created_at', { ascending: false }),
     ])
-    if (bR.data) { setBooks(bR.data); if (!selBook) setSelBook(bR.data[0]?.id) }
-    if (mR.data) setMembers(mR.data)
-    if (pR.data) setPosts(pR.data)
-    if (tR.data) setThreads(tR.data)
-    if (lR.data) setLikes(lR.data)
-    if (rR.data) { const c={}; rR.data.forEach(r=>{c[r.post_id]=(c[r.post_id]||0)+1}); setReplyCounts(c) }
+    if (cR.data) setClubs(cR.data)
+    if (bR.data) setBooks(bR.data)
   }
 
-  async function loadThreadPosts(threadId) {
-    const { data } = await supabase.from('thread_replies').select('*, member:members(*)').eq('thread_id', threadId).order('created_at')
-    if (data) setThreadPosts(data)
+  function doSearch(val) {
+    setQ(val)
+    if (val.length < 2) { setSR(null); return }
+    const lv = val.toLowerCase()
+    const clubHits = clubs.filter(c => c.name.toLowerCase().includes(lv))
+    const bookHits = books.filter(b => b.title.toLowerCase().includes(lv))
+    setSR({ clubs: clubHits, books: bookHits })
   }
 
-  async function handleRegister() {
-    setRegError('')
-    if (regStep === 0) {
-      if (!regData.first.trim()||!regData.last.trim()||!regData.email.trim()) { setRegError('All fields are required.'); return }
-      setRegStep(1); return
-    }
-    if (!selFigure) { setRegError('Choose your voice.'); return }
-    const initials = ((regData.first?.[0]||'')+(regData.last?.[0]||'')).toUpperCase()
-    const fig = getFigure(selFigure)
-    const { data, error } = await supabase.from('members').insert({ first_name:regData.first.trim(), last_name:regData.last.trim(), email:regData.email.trim().toLowerCase(), initials, color:fig.color, avatar_figure:selFigure }).select().single()
-    if (error) {
-      if (error.code === '23505') {
-        const { data:ex } = await supabase.from('members').select('*').eq('email', regData.email.trim().toLowerCase()).single()
-        if (ex) { setCurrentUser(ex); try{window.localStorage?.setItem?.('unscripted_user',JSON.stringify(ex))}catch(e){}; setShowReg(false); setRegStep(0); return }
-      }
-      setRegError(error.message); return
-    }
-    setCurrentUser(data); try{window.localStorage?.setItem?.('unscripted_user',JSON.stringify(data))}catch(e){}
-    setShowReg(false); setRegStep(0); setRegData({first:'',last:'',email:''}); setSelFigure(null); loadData()
+  function getClubMemberCount(c) {
+    return c.club_members?.[0]?.count || 0
   }
 
-  async function saveProfile() {
-    if (!currentUser) return
-    const { data } = await supabase.from('members').update({ fav_book:profileForm.fav_book||null, fav_book_author:profileForm.fav_book_author||null, one_word:profileForm.one_word||null, fav_cartoon:profileForm.fav_cartoon||null }).eq('id', currentUser.id).select().single()
-    if (data) { setCurrentUser(data); try{window.localStorage?.setItem?.('unscripted_user',JSON.stringify(data))}catch(e){} }
-    setShowEditProfile(false); loadData()
+  function getClubCurrentBook(c) {
+    const b = (c.books || []).find(b => b.status === 'current')
+    return b || (c.books || [])[0]
   }
 
-  async function submitFeedPost() {
-    if (!newPost.trim()||!currentUser) return
-    const tag = document.getElementById('tag-select')?.value || 'community'
-    await supabase.from('posts').insert({ member_id:currentUser.id, content:newPost.trim(), tag, sitting_with:newSit.trim()||null, themes:newThemes.trim()||null })
-    setNewPost(''); setNewSit(''); setNewThemes(''); loadData()
-  }
-
-  async function submitThreadPost() {
-    if (!threadNewPost.trim()||!currentUser||!activeThread) return
-    await supabase.from('thread_replies').insert({ thread_id:activeThread.id, member_id:currentUser.id, content:threadNewPost.trim(), sitting_with:threadNewSit.trim()||null, themes:threadNewThemes.trim()||null })
-    setThreadNewPost(''); setThreadNewSit(''); setThreadNewThemes(''); loadThreadPosts(activeThread.id)
-  }
-
-  async function submitReply(parentId) {
-    if (!replyText.trim()||!currentUser||!activeThread) return
-    await supabase.from('thread_replies').insert({ thread_id:activeThread.id, member_id:currentUser.id, content:replyText.trim(), parent_reply_id:parentId })
-    setReplyText(''); setReplyingTo(null); setExpandedReplies(p=>({...p,[parentId]:true})); loadThreadPosts(activeThread.id)
-  }
-
-  async function toggleLike(postId) {
-    if (!currentUser) { setShowReg(true); return }
-    const ex = likes.find(l=>l.post_id===postId&&l.member_id===currentUser.id)
-    if (ex) await supabase.from('likes').delete().eq('id', ex.id)
-    else await supabase.from('likes').insert({ post_id:postId, member_id:currentUser.id })
-    loadData()
-  }
-
-  const isLiked = pid => currentUser && likes.some(l=>l.post_id===pid&&l.member_id===currentUser.id)
-  const likeCount = pid => likes.filter(l=>l.post_id===pid).length
-
-  const goHome = () => { setView('home'); setProfileMember(null); setActiveThread(null) }
-  const goDisc = bid => { if(bid)setSelBook(bid); setDiscMode('chapters'); setView('disc'); setActiveThread(null) }
-  const openProfile = m => { setProfileMember(m); setView('profile') }
-  const openThread = (t, b) => { setActiveThread(t); setActiveThreadBook(b); setView('thread'); setReplyingTo(null); setExpandedReplies({}); loadThreadPosts(t.id) }
-
-  const curBook = books.find(b=>b.status==='current') || books[0]
-  const activeBook = books.find(b=>b.id===selBook) || curBook
-  const curThreads = threads.filter(t=>curBook&&t.book_id===curBook.id&&t.chapter_number>0)
-  const activeChapterThreads = threads.filter(t=>activeBook&&t.book_id===activeBook.id&&t.chapter_number>0)
-  const activeOpenThread = threads.find(t=>activeBook&&t.book_id===activeBook.id&&t.chapter_number===0)
-  const prog = curBook ? (curBook.current_chapter/curBook.total_chapters)*100 : 0
-
-  const allFeedThemes = [...new Set(posts.flatMap(p=>(p.themes||'').split(',').map(t=>t.trim())).filter(Boolean))]
-  const filteredPosts = filterTheme ? posts.filter(p=>(p.themes||'').toLowerCase().includes(filterTheme.toLowerCase())) : posts
-
-  const topLevelThreadPosts = threadPosts.filter(p=>!p.parent_reply_id)
-  const threadReplies = threadPosts.filter(p=>p.parent_reply_id)
-  const getReplies = pid => threadReplies.filter(r=>r.parent_reply_id===pid)
-  const threadThemes = [...new Set(topLevelThreadPosts.flatMap(p=>(p.themes||'').split(',').map(t=>t.trim())).filter(Boolean))]
-
-  const filteredFigs = figCat==='All' ? FIGURES : FIGURES.filter(f=>f.cat===figCat)
-
-  const parseThemes = str => (str||'').split(',').map(t=>t.trim()).filter(Boolean)
+  const featuredClubs = clubs.filter(c => c.featured)
+  const uniqueBooks = [...new Map(books.map(b => [b.title, b])).values()].slice(0, 6)
 
   return (
-    <div style={{minHeight:'100vh'}}>
-      <title>unscripted</title>
-
-      {/* ═══ REGISTER ═══ */}
-      {showReg && <div className="modal-overlay" onClick={()=>{setShowReg(false);setRegStep(0)}}>
-        <div className={`modal-box ${regStep===1?'wide':''}`} onClick={e=>e.stopPropagation()}>
-          <button className="modal-close" onClick={()=>{setShowReg(false);setRegStep(0)}}>×</button>
-          <div style={{display:'flex',justifyContent:'center',marginBottom:24}}><Logo/></div>
-          {regStep===0&&<>
-            <h2 className="modal-title">Pull up a chair.</h2>
-            <p className="modal-sub">This isn't just a book club. It's a commitment to think deeper, listen harder, and show up. One mic. Every voice matters.</p>
-            {regError&&<p className="modal-err">{regError}</p>}
-            <label className="field-label">First Name</label><input className="field-input" placeholder="First name" value={regData.first} onChange={e=>setRegData(d=>({...d,first:e.target.value}))}/>
-            <label className="field-label">Last Name</label><input className="field-input" placeholder="Last name" value={regData.last} onChange={e=>setRegData(d=>({...d,last:e.target.value}))}/>
-            <label className="field-label">Email</label><input className="field-input" placeholder="you@email.com" type="email" value={regData.email} onChange={e=>setRegData(d=>({...d,email:e.target.value}))}/>
-            <button className="modal-submit" onClick={handleRegister}>Continue</button>
-          </>}
-          {regStep===1&&<>
-            <h2 className="modal-title" style={{fontSize:28}}>Choose your voice.</h2>
-            <p className="modal-sub">Pick the figure who speaks to how you move through the world.</p>
-            {regError&&<p className="modal-err">{regError}</p>}
-            <div className="fig-tabs">{['All','Literature','Art','Culture'].map(c=><button key={c} className={`fig-tab ${figCat===c?'act':''}`} onClick={()=>setFigCat(c)}>{c}</button>)}</div>
-            <div className="fig-grid">{filteredFigs.map(f=><div key={f.id} className={`fig-card ${selFigure===f.id?'selected':''}`} onClick={()=>setSelFigure(f.id)}><div className="fig-av-lg" style={{background:f.color}}>{f.icon}</div><div className="fig-name">{f.name}</div><div className="fig-sig">{f.sig}</div></div>)}</div>
-            <button className="modal-submit" style={{marginTop:24}} onClick={handleRegister}>Enter the room</button>
-          </>}
-          <div className="step-dots"><div className={`step-dot ${regStep===0?'act':''}`}/><div className={`step-dot ${regStep===1?'act':''}`}/></div>
-        </div>
-      </div>}
-
-      {/* ═══ EDIT PROFILE ═══ */}
-      {showEditProfile&&currentUser&&<div className="modal-overlay" onClick={()=>setShowEditProfile(false)}>
-        <div className="modal-box" onClick={e=>e.stopPropagation()}>
-          <button className="modal-close" onClick={()=>setShowEditProfile(false)}>×</button>
-          <h2 className="modal-title" style={{fontSize:28}}>Your profile</h2>
-          <label className="field-label">Favorite Book</label><input className="field-input" placeholder="Title" value={profileForm.fav_book} onChange={e=>setProfileForm(d=>({...d,fav_book:e.target.value}))}/>
-          <label className="field-label">Author</label><input className="field-input" placeholder="Author" value={profileForm.fav_book_author} onChange={e=>setProfileForm(d=>({...d,fav_book_author:e.target.value}))}/>
-          <label className="field-label">Describe yourself in one word</label><input className="field-input" placeholder="One word" value={profileForm.one_word} onChange={e=>setProfileForm(d=>({...d,one_word:e.target.value}))}/>
-          <label className="field-label">Favorite Cartoon Character</label><input className="field-input" placeholder="Character" value={profileForm.fav_cartoon} onChange={e=>setProfileForm(d=>({...d,fav_cartoon:e.target.value}))}/>
-          <button className="modal-submit" onClick={saveProfile}>Save</button>
-        </div>
-      </div>}
-
+    <div style={{ minHeight: '100vh' }}>
+      <title>unscripted — every reader deserves a room</title>
       <div className="shell">
-        {/* ═══ NAV ═══ */}
+
+        {/* NAV */}
         <nav className="topnav">
-          <div className="brand" onClick={goHome}><Logo/></div>
+          <div className="brand"><Logo /></div>
           <div className="nav-links">
-            <button className={`nav-btn ${view==='home'?'active':''}`} onClick={goHome}>Home</button>
-            <button className={`nav-btn ${view==='disc'||view==='thread'?'active':''}`} onClick={()=>goDisc(null)}>Discussions</button>
-            {currentUser ? <div className="user-nav" onClick={()=>{setProfileForm({fav_book:currentUser.fav_book||'',fav_book_author:currentUser.fav_book_author||'',one_word:currentUser.one_word||'',fav_cartoon:currentUser.fav_cartoon||''});setShowEditProfile(true)}}><MemberAvatar member={currentUser} size={32}/><span className="user-nav-name">{currentUser.first_name}</span></div> : <button className="join-btn" onClick={()=>setShowReg(true)}>Join</button>}
+            <button className="nav-btn active">Explore</button>
+            {currentUser ? (
+              <div className="user-nav" onClick={() => router.push('/club/main')}>
+                <span className="user-nav-name">{currentUser.first_name}</span>
+              </div>
+            ) : (
+              <button className="join-btn" onClick={() => router.push('/signup')}>Join</button>
+            )}
           </div>
         </nav>
 
-        {/* ═══ HOME ═══ */}
-        {view==='home'&&<div style={{opacity:vis?1:0,transform:vis?'translateY(0)':'translateY(16px)',transition:'all 0.7s cubic-bezier(0.22,1,0.36,1)'}}>
-          <section className="hero">
-            <div>
-              <h1 className="hero-h1">Critical thinking.<br/>Community. Literacy.<br/><em>Have an opinion.</em></h1>
-              <p className="hero-p">A space built on the belief that the right book, read by the right people, at the right time — changes everything.</p>
+        {/* HERO + SEARCH */}
+        <section style={{ padding: '60px 0 48px', textAlign: 'center' }}>
+          <h1 className="hero-h1" style={{ textAlign: 'center' }}>Every reader<br />deserves a <em>room.</em></h1>
+          <p style={{ fontFamily: 'var(--ui)', fontSize: 16, lineHeight: 1.7, color: 'var(--txD)', maxWidth: 520, margin: '0 auto 36px' }}>
+            Find your book club. Start your own. Join the conversation that changes how you think.
+          </p>
+
+          <div style={{ maxWidth: 560, margin: '0 auto', position: 'relative' }}>
+            <input
+              className="field-input"
+              style={{ marginBottom: 0, paddingLeft: 48, boxShadow: '0 4px 20px rgba(0,0,0,0.04)', borderRadius: 14, fontSize: 15 }}
+              placeholder="Search by club name or book title..."
+              value={q}
+              onChange={e => doSearch(e.target.value)}
+            />
+            <span style={{ position: 'absolute', left: 20, top: '50%', transform: 'translateY(-50%)', fontSize: 18 }}>🔍</span>
+
+            {sr && <div style={{ position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 400, overflowY: 'auto' }}>
+              {sr.clubs.length === 0 && sr.books.length === 0 && (
+                <div style={{ padding: 24, fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', textAlign: 'center' }}>No results for "{q}"</div>
+              )}
+              {sr.clubs.length > 0 && <div>
+                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Clubs</div>
+                {sr.clubs.map(c => (
+                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
+                    onClick={() => router.push(`/club/${c.id}`)}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>{c.name}</div>
+                      <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{getClubMemberCount(c)} members</div>
+                    </div>
+                    <span className="tag" style={{ background: c.privacy === 'open' ? 'rgba(94,122,98,0.1)' : 'var(--tcD)', color: c.privacy === 'open' ? 'var(--sg)' : 'var(--tc)' }}>{c.privacy}</span>
+                  </div>
+                ))}
+              </div>}
+              {sr.books.length > 0 && <div>
+                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Books</div>
+                {sr.books.map(b => (
+                  <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
+                    onClick={() => router.push(`/book/${b.id}`)}>
+                    <span style={{ fontSize: 20 }}>📖</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</div>
+                      <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.club ? ` · ${b.club.name}` : ''}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>}
+            </div>}
+          </div>
+        </section>
+
+        {/* SPOTLIGHT */}
+        <section style={{ marginBottom: 48 }}>
+          <div style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 20 }}>✦ Spotlight</div>
+          <div style={{ background: 'var(--ink)', borderRadius: 20, padding: '40px 48px', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: 'linear-gradient(90deg, var(--tc), var(--sg))' }} />
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--tc)', marginBottom: 16 }}>Book of the Month</div>
+            <div style={{ fontFamily: 'var(--hd)', fontSize: 32, fontWeight: 600, fontStyle: 'italic', color: '#F2EBE0', lineHeight: 1.15, marginBottom: 8 }}>I Who Have Never Known Men</div>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'rgba(242,235,224,0.5)', marginBottom: 20 }}>Jacqueline Harpman</div>
+            <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontStyle: 'italic', lineHeight: 1.7, color: 'rgba(242,235,224,0.6)', marginBottom: 24, maxWidth: 600 }}>
+              Forty women locked in an underground cage. No memory of why. When the guards vanish, they walk into an empty earth — and the youngest among them becomes their guide.
             </div>
-            <div>{curBook&&<div className="book-card" onClick={()=>goDisc(curBook.id)}><div className="book-card-inner"><div className="book-label"><span className="book-dot"/>Currently Reading</div><div className="book-title">{curBook.title}</div><div className="book-author">{curBook.author}</div><div className="progress-bg"><div className="progress-fill" style={{width:`${prog}%`}}/></div><div className="progress-stats"><span>Ch. {curBook.current_chapter} of {curBook.total_chapters}</span><span>{Math.round(prog)}%</span></div><div className="book-readers"><div style={{display:'flex'}}>{members.slice(0,5).map((m,i)=><div key={m.id} style={{marginLeft:i?-6:0}}><MemberAvatar member={m} size={26}/></div>)}</div><span className="book-readers-label">{members.length} reading</span><span className="book-cta">Join discussion →</span></div></div></div>}</div>
-          </section>
-
-          {members.length>0&&<section style={{paddingBottom:48}}><div className="section-header"><div className="section-title">The Voices at the Table</div></div><div className="voices-scroll">{members.map(m=><div key={m.id} className="voice-card" onClick={()=>openProfile(m)}><MemberAvatar member={m} size={44}/><div className="voice-meta"><span className="voice-name">{m.first_name}</span><span className="voice-role">{m.role}</span></div></div>)}</div></section>}
-
-          <div className="main-grid"><div>
-            <div className="section-header" style={{marginBottom:20}}><div className="section-title">The Feed</div></div>
-            {allFeedThemes.length>0&&<div className="theme-filter"><span className="section-title" style={{marginRight:8}}>Themes</span><ThemePill t="All" active={!filterTheme} onClick={()=>setFilterTheme(null)}/>{allFeedThemes.map(t=><ThemePill key={t} t={t} active={filterTheme===t} onClick={()=>setFilterTheme(filterTheme===t?null:t)}/>)}</div>}
-
-            {currentUser?<div className="compose"><div className="compose-row"><MemberAvatar member={currentUser} size={36}/><textarea className="compose-input" placeholder="Say what's on your mind..." value={newPost} onChange={e=>setNewPost(e.target.value)} rows={2}/></div><div className="compose-depth"><div className="compose-depth-label">Optional — add depth</div><div className="compose-depth-row"><span className="compose-depth-name">Sitting with</span><input className="compose-depth-input italic" placeholder="A line from the book..." value={newSit} onChange={e=>setNewSit(e.target.value)}/></div><div className="compose-depth-row"><span className="compose-depth-name">Themes</span><input className="compose-depth-input" placeholder="survival, identity (comma separated)" value={newThemes} onChange={e=>setNewThemes(e.target.value)}/></div></div><div className="compose-foot"><select className="tag-select" id="tag-select"><option value="community">Community</option><option value="reflection">Reflection</option><option value="book">Book</option></select><button className="share-btn" disabled={!newPost.trim()} onClick={submitFeedPost}>Share</button></div></div>:<div className="compose compose-cta" onClick={()=>setShowReg(true)}><p className="compose-placeholder">Join to share your thoughts...</p></div>}
-
-            {filteredPosts.map(p=>{const m=p.member||{};const th=parseThemes(p.themes);return<div key={p.id} className="feed-card"><div className="feed-header"><MemberAvatar member={m} size={32}/><div><span className="feed-name" onClick={()=>openProfile(m)}>{m.first_name}</span><span className="feed-time">{timeAgo(p.created_at)}</span></div><span style={{marginLeft:'auto'}}><Tag tag={p.tag}/></span></div><div className="feed-body">{p.content}</div>{p.sitting_with&&<div className="sitting-with"><div className="sitting-label">Sitting with</div><div className="sitting-text">"{p.sitting_with}"</div></div>}{th.length>0&&<div className="theme-pills">{th.map(t=><ThemePill key={t} t={t} active={filterTheme===t} onClick={()=>setFilterTheme(filterTheme===t?null:t)}/>)}</div>}<div className="feed-actions"><button className={`feed-action ${isLiked(p.id)?'liked':''}`} onClick={()=>toggleLike(p.id)}>{isLiked(p.id)?'\u2665':'\u2661'} {likeCount(p.id)}</button><span className="feed-action">{'\u21A9'} {replyCounts[p.id]||0}</span></div></div>})}
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button className="join-btn" style={{ background: 'var(--tc)', color: 'var(--ink)' }}>Find a club reading this</button>
+              <button className="join-btn" style={{ background: 'none', border: '1.5px solid rgba(242,235,224,0.2)', color: '#F2EBE0' }} onClick={() => router.push('/signup')}>Start your own</button>
+            </div>
           </div>
+        </section>
 
-          <div className="sidebar">
-            <div className="sidebar-section"><div className="sidebar-label">Chapter Threads</div>{curThreads.map(t=><div className="thread-card" key={t.id} onClick={()=>openThread(t,curBook)}><span className={`thread-num ${t.is_active?'hot':''}`}>Ch.{t.chapter_number}</span><span className="thread-title-text">{t.title}</span>{t.is_active&&<span className="active-dot"/>}<span className="thread-arrow">→</span></div>)}</div>
-            {curBook&&members.length>0&&<div className="sidebar-section"><div className="sidebar-label">Reading Pulse</div><div className="pulse-card"><div className="pulse-book-title">{curBook.title}</div><div className="pulse-book-info">{curBook.total_chapters} chapters</div><div className="pulse-list">{members.map(m=>{const jitter=Math.abs((m.id?.charCodeAt?.(0)||0)%30)-15;const pct=Math.max(8,Math.min(100,prog+jitter));return<div key={m.id} className="pulse-row"><MemberAvatar member={m} size={24}/><div className="pulse-bar-wrap"><div className="pulse-bar-header"><span className="pulse-bar-name">{m.first_name}</span><span className="pulse-bar-pct">{Math.round(pct)}%</span></div><div className="pulse-bar-bg"><div className="pulse-bar-fill" style={{width:`${pct}%`,background:progressColor(pct)}}/></div></div></div>})}</div><div className="pulse-legend">{[['#B0A594','Starting'],['#C27A5A','Moving'],['#7A9A7E','Ahead'],['#5E7A62','Caught up']].map(([c,l])=><span key={l}><span className="legend-dot" style={{background:c}}/>{l}</span>)}</div></div></div>}
-          </div></div>
-        </div>}
-
-        {/* ═══ DISCUSSIONS ═══ */}
-        {view==='disc'&&<div style={{padding:'40px 0 80px'}}>
-          <div className="section-title" style={{marginBottom:20}}>The Bookshelf</div>
-          <div className="shelf">{books.map(b=><div key={b.id} className={`shelf-item ${selBook===b.id?'active':''}`} onClick={()=>{setSelBook(b.id);setDiscMode('chapters')}}><div className={`shelf-title ${selBook===b.id?'inv':''}`}>{b.title}</div><div className={`shelf-author ${selBook===b.id?'inv':''}`}>{b.author}</div><span className="tag" style={{background:b.status==='current'?(selBook===b.id?'rgba(194,122,90,0.25)':'var(--tcD)'):(selBook===b.id?'rgba(94,122,98,0.25)':'rgba(94,122,98,0.1)'),color:b.status==='current'?'var(--tc)':'var(--sg)',width:'fit-content',marginTop:4}}>{b.status==='current'?'Reading Now':'Completed'}</span></div>)}</div>
-
-          {activeBook&&<><div className="disc-header"><div className="disc-title">{activeBook.title}</div>{activeBook.status==='current'&&<div className="disc-active"><span className="active-dot"/>Active</div>}</div><div className="disc-meta">by {activeBook.author} · {activeChapterThreads.length} threads{activeOpenThread?' · Open discussion':''}</div>
-
-          {activeBook.status==='completed'&&activeOpenThread&&<div className="mode-toggle"><button className={`mode-btn ${discMode==='chapters'?'act':''}`} onClick={()=>setDiscMode('chapters')}>By Chapter</button><button className={`mode-btn ${discMode==='open'?'act':''}`} onClick={()=>setDiscMode('open')}>Open Discussion</button></div>}
-
-          {(discMode==='chapters'||activeBook.status==='current')&&<div>{activeChapterThreads.map(t=><div className="thread-card-lg" key={t.id} onClick={()=>openThread(t,activeBook)}><div className={`thread-badge ${t.is_active?'hot':''}`}>{t.chapter_number}</div><div className="thread-info"><div className="thread-info-title">{t.title}</div><div className="thread-info-meta">{t.is_active?'Active':'Completed'}</div></div>{t.is_active&&<span className="active-dot"/>}<span className="thread-arrow">→</span></div>)}{activeBook.status==='current'&&Array.from({length:activeBook.total_chapters-activeChapterThreads.length},(_,i)=><div className="thread-card-lg faded" key={`f${i}`}><div className="thread-badge">{activeChapterThreads.length+i+1}</div><div className="thread-info"><div className="thread-info-title faded-text">Coming Soon</div><div className="thread-info-meta">Opens with reading schedule</div></div></div>)}</div>}
-
-          {discMode==='open'&&activeBook.status==='completed'&&activeOpenThread&&<div><div className="open-card" onClick={()=>openThread(activeOpenThread,activeBook)}><div className="open-card-row"><div className="open-icon">💬</div><div className="open-info"><div className="open-title">{activeOpenThread.title}</div><div className="open-meta">All chapters · No spoiler walls</div></div><div className="open-enter">Enter</div></div><div className="open-desc">The full conversation — no chapter boundaries. Spoilers welcome.</div></div><div className="section-title" style={{marginTop:32,marginBottom:16}}>Or dive into a specific chapter</div>{activeChapterThreads.map(t=><div className="thread-card-sm" key={t.id} onClick={()=>openThread(t,activeBook)}><div className="thread-badge-sm">{t.chapter_number}</div><div className="thread-info"><div className="thread-info-title">{t.title}</div></div></div>)}</div>}
-          </>}
-        </div>}
-
-        {/* ═══ THREAD ═══ */}
-        {view==='thread'&&activeThread&&activeThreadBook&&<div style={{padding:'20px 0 80px'}}>
-          <div className="thread-view-header">
-            <button className="thread-view-back" onClick={()=>goDisc(activeThreadBook.id)}>← Back to {activeThreadBook.title}</button>
-            <div className="thread-view-book">{activeThreadBook.title}</div>
-            <div className="thread-view-title">{activeThread.title}</div>
-            <div className="thread-view-meta">{topLevelThreadPosts.length} posts · {threadReplies.length} replies</div>
+        {/* AD BANNER */}
+        <a href="https://thelitbar.com" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', color: 'inherit' }}>
+          <div style={{ background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 14, padding: '24px 32px', marginBottom: 48, display: 'flex', alignItems: 'center', gap: 24, cursor: 'pointer' }}>
+            <div style={{ width: 80, height: 80, borderRadius: 12, background: 'var(--sf2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, flexShrink: 0 }}>📚</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 8, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 6 }}>Sponsored</div>
+              <div style={{ fontFamily: 'var(--hd)', fontSize: 20, fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>The Lit Bar — Bronx, NY</div>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.5 }}>The Bronx's only indie bookstore. 10% off for unscripted members.</div>
+            </div>
+            <span style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', flexShrink: 0 }}>Visit ↗</span>
           </div>
+        </a>
 
-          {currentUser&&<div className="thread-compose"><div className="compose-row"><MemberAvatar member={currentUser} size={36}/><textarea className="compose-input" placeholder={`Share your thoughts on "${activeThread.title}"...`} value={threadNewPost} onChange={e=>setThreadNewPost(e.target.value)} rows={2}/></div><div className="compose-depth"><div className="compose-depth-label">Optional — add depth</div><div className="compose-depth-row"><span className="compose-depth-name">Sitting with</span><input className="compose-depth-input italic" placeholder="A line from the book..." value={threadNewSit} onChange={e=>setThreadNewSit(e.target.value)}/></div><div className="compose-depth-row"><span className="compose-depth-name">Themes</span><input className="compose-depth-input" placeholder="survival, identity (comma separated)" value={threadNewThemes} onChange={e=>setThreadNewThemes(e.target.value)}/></div></div><div className="compose-foot"><button className="share-btn" disabled={!threadNewPost.trim()} onClick={submitThreadPost}>Post to thread</button></div></div>}
+        {/* FEATURED CLUBS */}
+        {featuredClubs.length > 0 && <section style={{ marginBottom: 48 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <div className="section-title">Featured Clubs</div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+            {featuredClubs.slice(0, 3).map(c => {
+              const cb = getClubCurrentBook(c)
+              return (
+                <div key={c.id} style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 16, padding: 24, cursor: 'pointer', position: 'relative', overflow: 'hidden' }}
+                  onClick={() => router.push(`/club/${c.id}`)}>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg, var(--tc), var(--sg))' }} />
+                  <div style={{ fontFamily: 'var(--hd)', fontSize: 20, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>{c.name}</div>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', marginBottom: 16, lineHeight: 1.5 }}>{c.description}</div>
+                  {cb && <div style={{ background: 'linear-gradient(145deg,#A85A3A,#C27A5A 40%,#D4956A)', borderRadius: 10, padding: '12px 16px', marginBottom: 14 }}>
+                    <div style={{ fontFamily: 'var(--ui)', fontSize: 8, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>Reading</div>
+                    <div style={{ fontFamily: 'var(--hd)', fontSize: 14, fontWeight: 600, fontStyle: 'italic', color: '#FFF' }}>{cb.title}</div>
+                  </div>}
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{getClubMemberCount(c)} members</div>
+                </div>
+              )
+            })}
+          </div>
+        </section>}
 
-          {threadThemes.length>0&&<div className="theme-filter">{threadThemes.map(t=><ThemePill key={t} t={t}/>)}</div>}
+        {/* TRENDING BOOKS */}
+        {uniqueBooks.length > 0 && <section style={{ marginBottom: 48 }}>
+          <div className="section-title" style={{ marginBottom: 20 }}>Trending on Unscripted</div>
+          <div style={{ display: 'flex', gap: 14, overflowX: 'auto', scrollbarWidth: 'none' }}>
+            {uniqueBooks.map(b => (
+              <div key={b.id} style={{ minWidth: 180, background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '20px 18px', flexShrink: 0, cursor: 'pointer' }}
+                onClick={() => router.push(`/book/${b.id}`)}>
+                <div style={{ fontFamily: 'var(--hd)', fontSize: 16, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)', lineHeight: 1.25, marginBottom: 6 }}>{b.title}</div>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}</div>
+              </div>
+            ))}
+          </div>
+        </section>}
 
-          {topLevelThreadPosts.length>0?topLevelThreadPosts.map(po=>{const m=po.member||{};const th=parseThemes(po.themes);const reps=getReplies(po.id);return<div key={po.id} style={{marginBottom:24}}>
-            <div className="feed-card"><div className="feed-header"><MemberAvatar member={m} size={32}/><div><span className="feed-name" onClick={()=>openProfile(m)}>{m.first_name}</span><span className="feed-time">{timeAgo(po.created_at)}</span></div></div><div className="feed-body">{po.content}</div>{po.sitting_with&&<div className="sitting-with"><div className="sitting-label">Sitting with</div><div className="sitting-text">"{po.sitting_with}"</div></div>}{th.length>0&&<div className="theme-pills">{th.map(t=><ThemePill key={t} t={t}/>)}</div>}
-            <div className="feed-actions"><button className="feed-action" onClick={()=>{setReplyingTo(replyingTo===po.id?null:po.id);setReplyText('')}}>↩ Reply</button>{reps.length>0&&<button className="feed-action" style={{marginLeft:'auto'}} onClick={()=>setExpandedReplies(p=>({...p,[po.id]:!p[po.id]}))}>{expandedReplies[po.id]?'Hide':'Show'} {reps.length} {reps.length===1?'reply':'replies'}</button>}</div></div>
+        {/* ALL CLUBS + SIDEBAR ADS */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 32, marginBottom: 48 }}>
+          <div>
+            <div className="section-title" style={{ marginBottom: 20 }}>All Clubs</div>
+            {clubs.map(c => {
+              const cb = getClubCurrentBook(c)
+              return (
+                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '18px 20px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 12, marginBottom: 10, cursor: 'pointer' }}
+                  onClick={() => router.push(`/club/${c.id}`)}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>{c.name}</div>
+                    <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{cb ? cb.title + ' · ' : ''}{getClubMemberCount(c)} members</div>
+                  </div>
+                  <span className="tag" style={{ background: c.privacy === 'open' ? 'rgba(94,122,98,0.1)' : 'var(--tcD)', color: c.privacy === 'open' ? 'var(--sg)' : 'var(--tc)' }}>{c.privacy}</span>
+                </div>
+              )
+            })}
+          </div>
+          <div>
+            {[
+              { t: 'Strand Bookstore', d: '18 miles of books since 1927.', url: 'https://strandbooks.com' },
+              { t: 'Audible', d: 'Listen to your club\'s current read. First month free.', url: 'https://audible.com' },
+            ].map((ad, i) => (
+              <a key={i} href={ad.url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', color: 'inherit' }}>
+                <div style={{ background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 14, padding: 24, marginBottom: 16, cursor: 'pointer' }}>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 8, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 10 }}>Sponsored</div>
+                  <div style={{ fontFamily: 'var(--hd)', fontSize: 18, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>{ad.t}</div>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', lineHeight: 1.5, marginBottom: 12 }}>{ad.d}</div>
+                  <span style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--tc)' }}>Visit ↗</span>
+                </div>
+              </a>
+            ))}
+          </div>
+        </div>
 
-            {replyingTo===po.id&&<div className="reply-compose"><div style={{display:'flex',gap:12}}><MemberAvatar member={currentUser||{initials:'?',color:'#8B6E52'}} size={28}/><div style={{flex:1}}><div className="reply-to-label">Replying to {m.first_name}</div><textarea className="reply-input" placeholder="Write your reply..." value={replyText} onChange={e=>setReplyText(e.target.value)} autoFocus rows={2}/></div></div><div className="reply-actions"><button className="reply-cancel" onClick={()=>setReplyingTo(null)}>Cancel</button><button className="reply-submit" style={{opacity:replyText.trim()?1:0.4}} onClick={()=>submitReply(po.id)}>Reply</button></div></div>}
-
-            {(expandedReplies[po.id]||replyingTo===po.id)&&reps.length>0&&<div className="replies-list">{reps.map(r=>{const rm=r.member||{};return<div key={r.id} className="reply-card"><div className="reply-header"><MemberAvatar member={rm} size={24}/><span className="reply-name">{rm.first_name}</span><span className="reply-time">{timeAgo(r.created_at)}</span></div><div className="reply-body">{r.content}</div></div>})}</div>}
-          </div>}):<div className="empty-state"><div className="empty-title">No posts yet</div><div className="empty-sub">Be the first to share your thoughts on this chapter.</div></div>}
-        </div>}
-
-        {/* ═══ PROFILE ═══ */}
-        {view==='profile'&&profileMember&&<div style={{paddingBottom:80}}>
-          <button className="profile-back" onClick={goHome}>← Back</button>
-          <div className="profile-header"><MemberAvatar member={profileMember} size={88}/><div><div className="profile-name">{profileMember.first_name} {profileMember.last_name}</div><div className="profile-role">{profileMember.role}</div>{profileMember.avatar_figure&&<div className="profile-figure">{getFigure(profileMember.avatar_figure).name}</div>}</div></div>
-
-          {(profileMember.fav_book||profileMember.one_word||profileMember.fav_cartoon)?<div className="bio-grid">
-            <div className="bio-card"><div className="bio-accent" style={{background:'var(--tc)'}}/><div className="bio-label">Favorite Book</div>{profileMember.fav_book?<><div className="bio-book-title">{profileMember.fav_book}</div><div className="bio-book-author">{profileMember.fav_book_author}</div></>:<div className="bio-empty">Not shared yet</div>}</div>
-            <div className="bio-card"><div className="bio-accent" style={{background:'var(--sg)'}}/><div className="bio-label">In one word</div>{profileMember.one_word?<div className="bio-word">{profileMember.one_word}</div>:<div className="bio-empty">Not shared yet</div>}</div>
-            <div className="bio-card"><div className="bio-accent" style={{background:'#6B6590'}}/><div className="bio-label">Favorite Cartoon Character</div>{profileMember.fav_cartoon?<div className="bio-cartoon">{profileMember.fav_cartoon}</div>:<div className="bio-empty">Not shared yet</div>}</div>
-          </div>:<div className="bio-empty-state"><div className="bio-empty-title">{profileMember.first_name} hasn't filled out their profile yet</div><div className="bio-empty-sub">When they do, you'll see their favorite book, a word that defines them, and their favorite cartoon character.</div></div>}
-
-          <div className="section-title" style={{marginBottom:20}}>Posts by {profileMember.first_name}</div>
-          {posts.filter(p=>p.member_id===profileMember.id).map(p=>{const th=parseThemes(p.themes);return<div key={p.id} className="feed-card"><div className="feed-header"><MemberAvatar member={profileMember} size={32}/><div><span className="feed-name">{profileMember.first_name}</span><span className="feed-time">{timeAgo(p.created_at)}</span></div><span style={{marginLeft:'auto'}}><Tag tag={p.tag}/></span></div><div className="feed-body">{p.content}</div>{p.sitting_with&&<div className="sitting-with"><div className="sitting-label">Sitting with</div><div className="sitting-text">"{p.sitting_with}"</div></div>}{th.length>0&&<div className="theme-pills">{th.map(t=><ThemePill key={t} t={t}/>)}</div>}</div>})}
-          {posts.filter(p=>p.member_id===profileMember.id).length===0&&<div className="profile-no-posts">{profileMember.first_name} hasn't posted yet — but they're reading.</div>}
-        </div>}
+        {/* FOOTER */}
+        <footer style={{ borderTop: '1px solid var(--bd)', padding: '32px 0 48px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontFamily: 'var(--cs)', fontSize: 20, color: 'var(--ink)' }}>unscripted</div>
+          <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>A bridger of community. Have an opinion.</div>
+        </footer>
       </div>
     </div>
   )
