@@ -1,9 +1,9 @@
-import BookSearch from '../components/BookSearch'
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import { FIGURES, getFigure } from '../lib/figures'
 import Logo from '../components/Logo'
+import BookSearch from '../components/BookSearch'
 
 export default function Signup() {
   const router = useRouter()
@@ -17,30 +17,12 @@ export default function Signup() {
   const [clubData, setCD] = useState({ name: '', desc: '', privacy: 'invite', bookTitle: '', bookAuthor: '', bookCh: '', noCh: false })
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
-  const [bkQ, setBkQ] = useState('')
-  const [bkR, setBkR] = useState([])
-  const [bkL, setBkL] = useState(false)
   const [createdUser, setCreatedUser] = useState(null)
   const timer = useRef(null)
 
   async function loadClubs() {
     const { data } = await supabase.from('clubs').select('*, club_members(count), books(title, status)')
     if (data) setClubs(data)
-  }
-
-  function searchBook(val) {
-    setBkQ(val)
-    if (timer.current) clearTimeout(timer.current)
-    if (val.length < 3) { setBkR([]); return }
-    setBkL(true)
-    timer.current = setTimeout(async () => {
-      try {
-        const r = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(val)}&limit=5&fields=title,author_name,first_publish_year,cover_i`)
-        const d = await r.json()
-        setBkR((d.docs || []).map(b => ({ title: b.title, author: (b.author_name || [])[0] || 'Unknown', year: b.first_publish_year, cover: b.cover_i ? `https://covers.openlibrary.org/b/id/${b.cover_i}-S.jpg` : null })))
-      } catch (e) { setBkR([]) }
-      setBkL(false)
-    }, 400)
   }
 
   async function createAccount() {
@@ -264,25 +246,22 @@ export default function Signup() {
 
           {step === 3 && <div>
             <div style={{ fontFamily: 'var(--hd)', fontSize: 28, fontWeight: 600, color: 'var(--ink)', marginBottom: 24 }}>What's the first book?</div>
-            <div style={{ position: 'relative', marginBottom: 24 }}>
-              <label style={fl}>Search for a book</label>
-              <input style={{ ...fi, marginBottom: 0 }} placeholder="Start typing a title..." value={bkQ} onChange={e => searchBook(e.target.value)} />
-              {(bkR.length > 0 || bkL) && <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 12, boxShadow: '0 12px 32px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 280, overflowY: 'auto', marginTop: 4 }}>
-                {bkL && <div style={{ padding: '16px 20px', fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>Searching...</div>}
-                {bkR.map((b, i) => <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }} onClick={() => { setCD(d => ({ ...d, bookTitle: b.title, bookAuthor: b.author })); setBkQ(''); setBkR([]) }}>
-                  {b.cover ? <img src={b.cover} style={{ width: 32, height: 44, borderRadius: 4, objectFit: 'cover' }} alt="" /> : <span style={{ fontSize: 20 }}>📖</span>}
-                  <div><div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>{b.title}</div><div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.year ? ` · ${b.year}` : ''}</div></div>
-                </div>)}
-              </div>}
-            </div>
-            {clubData.bookTitle && <div style={{ background: 'var(--sf2)', borderRadius: 12, padding: '16px 20px', marginBottom: 24 }}>
-              <div style={{ fontFamily: 'var(--hd)', fontSize: 18, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{clubData.bookTitle}</div>
-              <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', marginBottom: 12 }}>{clubData.bookAuthor}</div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--ink)', cursor: 'pointer', marginBottom: clubData.noCh ? 0 : 16 }}>
-                <input type="checkbox" checked={clubData.noCh} onChange={e => setCD(d => ({ ...d, noCh: e.target.checked }))} style={{ width: 18, height: 18, accentColor: 'var(--tc)' }} />No numbered chapters
-              </label>
-              {!clubData.noCh && <div style={{ marginTop: 16 }}><label style={fl}>How many chapters?</label><input style={{ ...fi, marginBottom: 0 }} type="number" placeholder="e.g. 12" value={clubData.bookCh} onChange={e => setCD(d => ({ ...d, bookCh: e.target.value }))} /></div>}
-            </div>}
+
+            <BookSearch
+              value={clubData.bookTitle ? { title: clubData.bookTitle, author: clubData.bookAuthor } : null}
+              onChange={(book) => setCD(d => ({
+                ...d,
+                bookTitle: book ? book.title : '',
+                bookAuthor: book ? book.author : '',
+              }))}
+              showChapters
+              chaptersValue={clubData.bookCh}
+              onChaptersChange={(val) => setCD(d => ({ ...d, bookCh: val }))}
+              noChapters={clubData.noCh}
+              onNoChaptersChange={(val) => setCD(d => ({ ...d, noCh: val }))}
+              style={{ marginBottom: 24 }}
+            />
+
             <div style={{ display: 'flex', gap: 12 }}>
               <button style={btnO} onClick={() => setStep(2)}>Back</button>
               <button style={{ ...btn, flex: 1 }} onClick={() => setStep(4)}>{clubData.bookTitle ? 'Continue' : 'Skip — add later'}</button>
@@ -310,6 +289,9 @@ export default function Signup() {
           <button style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--txD)', background: 'none', border: 'none', cursor: 'pointer' }} onClick={() => { setMode(null); setStep(0) }}>← Back to sign up options</button>
         </div>}
       </div>
+    </div>
+  )
+}
     </div>
   )
 }
