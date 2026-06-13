@@ -1,3 +1,4 @@
+import BookSearch from '../components/BookSearch'
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
