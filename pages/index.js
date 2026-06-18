@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
@@ -8,12 +8,27 @@ export default function Landing() {
   const [clubs, setClubs] = useState([])
   const [books, setBooks] = useState([])
   const [q, setQ] = useState('')
-  const [sr, setSR] = useState(null)
+  const [clubHits, setClubHits] = useState([])
+  const [bookHits, setBookHits] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [showDropdown, setShowDropdown] = useState(false)
   const [currentUser, setCurrentUser] = useState(null)
+  const searchTimer = useRef(null)
+  const wrapperRef = useRef(null)
 
   useEffect(() => {
     loadData()
     try { const sv = window.localStorage?.getItem?.('unscripted_user'); if (sv) setCurrentUser(JSON.parse(sv)) } catch(e) {}
+  }, [])
+
+  useEffect(() => {
+    function handleClick(e) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setShowDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
   async function loadData() {
@@ -27,11 +42,33 @@ export default function Landing() {
 
   function doSearch(val) {
     setQ(val)
-    if (val.length < 2) { setSR(null); return }
+    if (val.trim().length < 2) {
+      setClubHits([])
+      setBookHits([])
+      setShowDropdown(false)
+      return
+    }
+    setShowDropdown(true)
     const lv = val.toLowerCase()
-    const clubHits = clubs.filter(c => c.name.toLowerCase().includes(lv))
-    const bookHits = books.filter(b => b.title.toLowerCase().includes(lv))
-    setSR({ clubs: clubHits, books: bookHits })
+    setClubHits(clubs.filter(c => c.name.toLowerCase().includes(lv)))
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    setSearching(true)
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(val.trim())}&limit=5&fields=title,author_name,first_publish_year,cover_i,key`)
+        const data = await res.json()
+        setBookHits((data.docs || []).map(b => ({
+          title: b.title,
+          author: (b.author_name || [])[0] || 'Unknown',
+          year: b.first_publish_year || null,
+          cover: b.cover_i ? `https://covers.openlibrary.org/b/id/${b.cover_i}-S.jpg` : null,
+          openLibraryKey: b.key || null,
+        })))
+      } catch(e) {
+        setBookHits([])
+      }
+      setSearching(false)
+    }, 380)
   }
 
   function getClubMemberCount(c) {
@@ -73,47 +110,65 @@ export default function Landing() {
             Find your book club. Start your own. Join the conversation that changes how you think.
           </p>
 
-          <div style={{ maxWidth: 560, margin: '0 auto', position: 'relative' }}>
+          <div ref={wrapperRef} style={{ maxWidth: 560, margin: '0 auto', position: 'relative' }}>
             <input
               className="field-input"
               style={{ marginBottom: 0, paddingLeft: 48, boxShadow: '0 4px 20px rgba(0,0,0,0.04)', borderRadius: 14, fontSize: 15 }}
-              placeholder="Search by club name or book title..."
+              placeholder="Search any book or club..."
               value={q}
               onChange={e => doSearch(e.target.value)}
+              onFocus={() => { if (q.trim().length >= 2) setShowDropdown(true) }}
+              autoComplete="off"
             />
             <span style={{ position: 'absolute', left: 20, top: '50%', transform: 'translateY(-50%)', fontSize: 18 }}>🔍</span>
 
-            {sr && <div style={{ position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 400, overflowY: 'auto' }}>
-              {sr.clubs.length === 0 && sr.books.length === 0 && (
-                <div style={{ padding: 24, fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', textAlign: 'center' }}>No results for "{q}"</div>
-              )}
-              {sr.clubs.length > 0 && <div>
-                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Clubs</div>
-                {sr.clubs.map(c => (
-                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
-                    onClick={() => router.push(`/club/${c.id}`)}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>{c.name}</div>
-                      <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{getClubMemberCount(c)} members</div>
-                    </div>
-                    <span className="tag" style={{ background: c.privacy === 'open' ? 'rgba(94,122,98,0.1)' : 'var(--tcD)', color: c.privacy === 'open' ? 'var(--sg)' : 'var(--tc)' }}>{c.privacy}</span>
+            {showDropdown && (
+              <div style={{ position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 420, overflowY: 'auto' }}>
+
+                {/* Club results */}
+                {clubHits.length > 0 && (
+                  <div>
+                    <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Clubs</div>
+                    {clubHits.map(c => (
+                      <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
+                        onClick={() => { setShowDropdown(false); router.push('/club/' + c.id) }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>{c.name}</div>
+                          <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{c.club_members?.[0]?.count || 0} members</div>
+                        </div>
+                        <span className="tag" style={{ background: c.privacy === 'open' ? 'rgba(94,122,98,0.1)' : 'var(--tcD)', color: c.privacy === 'open' ? 'var(--sg)' : 'var(--tc)' }}>{c.privacy}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>}
-              {sr.books.length > 0 && <div>
-                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Books</div>
-                {sr.books.map(b => (
-                  <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
-                    onClick={() => router.push(`/book/${b.id}`)}>
-                    <span style={{ fontSize: 20 }}>📖</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</div>
-                      <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.club ? ` · ${b.club.name}` : ''}</div>
+                )}
+
+                {/* Book results from Open Library */}
+                <div>
+                  <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Books</div>
+                  {searching && (
+                    <div style={{ padding: '14px 24px', fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>Searching...</div>
+                  )}
+                  {!searching && bookHits.length === 0 && (
+                    <div style={{ padding: '14px 24px', fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>No books found for "{q}"</div>
+                  )}
+                  {!searching && bookHits.map((b, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
+                      onClick={() => { setShowDropdown(false); router.push('/signup') }}>
+                      {b.cover
+                        ? <img src={b.cover} style={{ width: 28, height: 40, borderRadius: 3, objectFit: 'cover', flexShrink: 0 }} alt="" onError={e => { e.target.style.display = 'none' }} />
+                        : <div style={{ width: 28, height: 40, borderRadius: 3, background: 'var(--sf2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>📖</div>
+                      }
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)', lineHeight: 1.2 }}>{b.title}</div>
+                        <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.year ? ' · ' + b.year : ''}</div>
+                      </div>
+                      <span style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--tc)', flexShrink: 0 }}>Start club →</span>
                     </div>
-                  </div>
-                ))}
-              </div>}
-            </div>}
+                  ))}
+                </div>
+
+              </div>
+            )}
           </div>
         </section>
 
