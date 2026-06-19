@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
-import { FIGURES, getFigure } from '../../lib/figures'
 import Logo from '../../components/Logo'
 import Tag from '../../components/Tag'
 
@@ -21,8 +20,6 @@ function progressColor(pct) {
 }
 
 function MemberAvatar({ member, size = 36 }) {
-  const fig = member?.avatar_figure ? getFigure(member.avatar_figure) : null
-  if (fig) return <div style={{width:size,height:size,borderRadius:'50%',background:fig.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:size*0.5,flexShrink:0,border:'2px solid rgba(255,255,255,0.15)',cursor:'pointer'}}>{fig.icon}</div>
   return <div style={{width:size,height:size,borderRadius:'50%',background:member?.color||'#8B6E52',display:'flex',alignItems:'center',justifyContent:'center',fontSize:size*0.31,fontWeight:700,fontFamily:'var(--ui)',color:'#FFF',flexShrink:0,border:'2px solid rgba(255,255,255,0.15)',cursor:'pointer'}}>{member?.initials||'?'}</div>
 }
 
@@ -83,6 +80,12 @@ export default function ClubPage() {
     if (ps) setPosts(ps)
     const { data: lk } = await supabase.from('likes').select('*')
     if (lk) setLikes(lk)
+  }
+
+  async function joinThisClub() {
+    if (!currentUser || !club) return
+    await supabase.from('club_members').insert({ club_id: club.id, member_id: currentUser.id, role: 'member' })
+    loadClub()
   }
 
   async function loadThreadPosts(threadId) {
@@ -223,6 +226,12 @@ export default function ClubPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16, paddingBottom: 20, borderBottom: '1px solid var(--bd)' }}>
             <div style={{ display: 'flex' }}>{members.slice(0, 6).map((m, i) => <div key={m.id} style={{ marginLeft: i ? -6 : 0 }}><MemberAvatar member={m} size={28} /></div>)}</div>
             <span style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>{members.length} members</span>
+            {currentUser && !members.some(m => m.id === currentUser.id) && (
+              <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 8, padding: '9px 18px', cursor: 'pointer', marginLeft: 'auto' }} onClick={joinThisClub}>Join club</button>
+            )}
+            {!currentUser && (
+              <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 8, padding: '9px 18px', cursor: 'pointer', marginLeft: 'auto' }} onClick={() => router.push('/signup')}>Join to participate</button>
+            )}
           </div>
         </div>
 
@@ -296,7 +305,6 @@ export default function ClubPage() {
             {members.map(m => <div key={m.id} className="feed-card" style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => openProfile(m)}>
               <MemberAvatar member={m} size={52} />
               <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)', marginTop: 14 }}>{m.first_name} {m.last_name}</div>
-              {m.avatar_figure && <div style={{ fontFamily: 'var(--hd)', fontSize: 12, fontStyle: 'italic', color: 'var(--txD)', marginTop: 4 }}>{getFigure(m.avatar_figure).name}</div>}
             </div>)}
           </div>
         </div>}
@@ -317,7 +325,7 @@ export default function ClubPage() {
         {/* PROFILE */}
         {view === 'profile' && profileMember && <div style={{ paddingBottom: 80 }}>
           <button className="profile-back" onClick={() => setView('feed')}>← Back</button>
-          <div className="profile-header"><MemberAvatar member={profileMember} size={88} /><div><div className="profile-name">{profileMember.first_name} {profileMember.last_name}</div><div className="profile-role">{profileMember.role || 'Member'}</div>{profileMember.avatar_figure && <div className="profile-figure">{getFigure(profileMember.avatar_figure).name}</div>}<span style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--tc)', cursor: 'pointer', display: 'inline-block', marginTop: 6 }} onClick={() => router.push(`/profile/${profileMember.id}`)}>View writing &amp; full profile →</span></div></div>
+          <div className="profile-header"><MemberAvatar member={profileMember} size={88} /><div><div className="profile-name">{profileMember.first_name} {profileMember.last_name}</div><div className="profile-role">{profileMember.role || 'Member'}</div><span style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--tc)', cursor: 'pointer', display: 'inline-block', marginTop: 6 }} onClick={() => router.push(`/profile/${profileMember.id}`)}>View writing &amp; full profile →</span></div></div>
           {(profileMember.fav_book || profileMember.one_word || profileMember.fav_cartoon) ? <div className="bio-grid">
             <div className="bio-card"><div className="bio-accent" style={{ background: 'var(--tc)' }} /><div className="bio-label">Favorite Book</div>{profileMember.fav_book ? <><div className="bio-book-title">{profileMember.fav_book}</div><div className="bio-book-author">{profileMember.fav_book_author}</div></> : <div className="bio-empty">Not shared yet</div>}</div>
             <div className="bio-card"><div className="bio-accent" style={{ background: 'var(--sg)' }} /><div className="bio-label">In one word</div>{profileMember.one_word ? <div className="bio-word">{profileMember.one_word}</div> : <div className="bio-empty">Not shared yet</div>}</div>
