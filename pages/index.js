@@ -7,6 +7,7 @@ export default function Landing() {
   const router = useRouter()
   const [clubs, setClubs] = useState([])
   const [books, setBooks] = useState([])
+  const [bridges, setBridges] = useState([])
   const [q, setQ] = useState('')
   const [sr, setSR] = useState(null)
   const [currentUser, setCurrentUser] = useState(null)
@@ -17,12 +18,14 @@ export default function Landing() {
   }, [])
 
   async function loadData() {
-    const [cR, bR] = await Promise.all([
+    const [cR, bR, gR] = await Promise.all([
       supabase.from('clubs').select('*, club_members(count), books(title, author, status)'),
       supabase.from('books').select('*, club:clubs(name)').order('created_at', { ascending: false }),
+      supabase.from('global_threads').select('*').order('club_count', { ascending: false }).limit(4),
     ])
     if (cR.data) setClubs(cR.data)
     if (bR.data) setBooks(bR.data)
+    if (gR.data) setBridges(gR.data)
   }
 
   function doSearch(val) {
@@ -135,6 +138,21 @@ export default function Landing() {
             </div>
           </div>
         </section>
+
+        {/* GLOBAL CONVERSATIONS */}
+        {bridges.length > 0 && <section style={{ marginBottom: 48 }}>
+          <div className="section-title" style={{ marginBottom: 20 }}><i className="ti ti-world" style={{ marginRight: 6 }} />Global conversations</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+            {bridges.map(b => (
+              <div key={b.id} style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '20px 22px', cursor: 'pointer' }}
+                onClick={() => router.push(`/bridge/${b.type}/${encodeURIComponent(b.ref)}`)}>
+                <span className="tag" style={{ background: b.type === 'book' ? 'var(--tcD)' : 'rgba(94,122,98,0.1)', color: b.type === 'book' ? 'var(--tc)' : 'var(--sg)' }}>{b.type}</span>
+                <div style={{ fontFamily: b.type === 'book' ? 'var(--hd)' : 'var(--ui)', fontStyle: b.type === 'book' ? 'italic' : 'normal', fontSize: 17, fontWeight: b.type === 'book' ? 600 : 700, color: 'var(--ink)', margin: '10px 0 4px' }}>{b.title}</div>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.club_count} club{b.club_count !== 1 ? 's' : ''} bridged</div>
+              </div>
+            ))}
+          </div>
+        </section>}
 
         {/* AD BANNER */}
         <a href="https://thelitbar.com" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', color: 'inherit' }}>
