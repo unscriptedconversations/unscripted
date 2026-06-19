@@ -1,10 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
 import { FIGURES, getFigure } from '../../lib/figures'
 import Logo from '../../components/Logo'
 import Tag from '../../components/Tag'
-import BookSearch from '../../components/BookSearch'
 
 function timeAgo(date) {
   const s = Math.floor((Date.now() - new Date(date)) / 1000)
@@ -59,7 +58,11 @@ export default function ClubPage() {
   const [replyText, setReplyText] = useState('')
   const [expandedReplies, setExpandedReplies] = useState({})
   const [showAddBook, setShowAddBook] = useState(false)
+  const [bkQ, setBkQ] = useState('')
+  const [bkR, setBkR] = useState([])
+  const [bkL, setBkL] = useState(false)
   const [newBook, setNewBook] = useState({ title: '', author: '', chapters: '', noCh: false })
+  const timer = useRef(null)
 
   useEffect(() => {
     try { const sv = window.localStorage?.getItem?.('unscripted_user'); if (sv) setCurrentUser(JSON.parse(sv)) } catch(e) {}
@@ -114,6 +117,21 @@ export default function ClubPage() {
     loadClub()
   }
 
+  function searchBook(val) {
+    setBkQ(val)
+    if (timer.current) clearTimeout(timer.current)
+    if (val.length < 3) { setBkR([]); return }
+    setBkL(true)
+    timer.current = setTimeout(async () => {
+      try {
+        const r = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(val)}&limit=5&fields=title,author_name,first_publish_year,cover_i`)
+        const d = await r.json()
+        setBkR((d.docs || []).map(b => ({ title: b.title, author: (b.author_name || [])[0] || 'Unknown', year: b.first_publish_year, cover: b.cover_i ? `https://covers.openlibrary.org/b/id/${b.cover_i}-S.jpg` : null })))
+      } catch (e) { setBkR([]) }
+      setBkL(false)
+    }, 400)
+  }
+
   async function addBook() {
     if (!newBook.title) return
     await supabase.from('books').update({ status: 'completed' }).eq('club_id', id).eq('status', 'current')
@@ -126,7 +144,7 @@ export default function ClubPage() {
     } else if (book) {
       await supabase.from('threads').insert({ book_id: book.id, chapter_number: 0, title: `Open Discussion: ${newBook.title}`, is_active: true })
     }
-    setShowAddBook(false); setNewBook({ title: '', author: '', chapters: '', noCh: false }); loadClub()
+    setShowAddBook(false); setNewBook({ title: '', author: '', chapters: '', noCh: false }); setBkQ(''); setBkR([]); loadClub()
   }
 
   const isLiked = pid => currentUser && likes.some(l => l.post_id === pid && l.member_id === currentUser.id)
@@ -159,20 +177,25 @@ export default function ClubPage() {
           <button className="modal-close" onClick={() => setShowAddBook(false)}>×</button>
           <h2 className="modal-title" style={{ fontSize: 28 }}>Add a new book</h2>
           <p className="modal-sub">This becomes the current read. Previous books move to completed.</p>
-          <BookSearch
-            value={newBook.title ? { title: newBook.title, author: newBook.author } : null}
-            onChange={(book) => setNewBook(d => ({
-              ...d,
-              title: book ? book.title : '',
-              author: book ? book.author : '',
-            }))}
-            showChapters
-            chaptersValue={newBook.chapters}
-            onChaptersChange={(val) => setNewBook(d => ({ ...d, chapters: val }))}
-            noChapters={newBook.noCh}
-            onNoChaptersChange={(val) => setNewBook(d => ({ ...d, noCh: val }))}
-            style={{ marginBottom: 24 }}
-          />
+          <div style={{ position: 'relative', marginBottom: 24 }}>
+            <label className="field-label">Search for a book</label>
+            <input className="field-input" style={{ marginBottom: 0 }} placeholder="Start typing a title..." value={bkQ} onChange={e => searchBook(e.target.value)} />
+            {(bkR.length > 0 || bkL) && <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 12, boxShadow: '0 12px 32px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 280, overflowY: 'auto', marginTop: 4 }}>
+              {bkL && <div style={{ padding: '16px 20px', fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>Searching...</div>}
+              {bkR.map((b, i) => <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }} onClick={() => { setNewBook(d => ({ ...d, title: b.title, author: b.author })); setBkQ(''); setBkR([]) }}>
+                {b.cover ? <img src={b.cover} style={{ width: 32, height: 44, borderRadius: 4, objectFit: 'cover' }} alt="" /> : <span style={{ fontSize: 20 }}>📖</span>}
+                <div><div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>{b.title}</div><div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.year ? ` · ${b.year}` : ''}</div></div>
+              </div>)}
+            </div>}
+          </div>
+          {newBook.title && <div style={{ background: 'var(--sf2)', borderRadius: 12, padding: '16px 20px', marginBottom: 24 }}>
+            <div style={{ fontFamily: 'var(--hd)', fontSize: 18, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{newBook.title}</div>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', marginBottom: 12 }}>{newBook.author}</div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--ink)', cursor: 'pointer', marginBottom: newBook.noCh ? 0 : 16 }}>
+              <input type="checkbox" checked={newBook.noCh} onChange={e => setNewBook(d => ({ ...d, noCh: e.target.checked }))} style={{ width: 18, height: 18, accentColor: 'var(--tc)' }} />No numbered chapters
+            </label>
+            {!newBook.noCh && <div style={{ marginTop: 16 }}><label className="field-label">How many chapters?</label><input className="field-input" style={{ marginBottom: 0 }} type="number" placeholder="e.g. 12" value={newBook.chapters} onChange={e => setNewBook(d => ({ ...d, chapters: e.target.value }))} /></div>}
+          </div>}
           <button className="modal-submit" onClick={addBook}>Add book</button>
         </div>
       </div>}
@@ -294,7 +317,7 @@ export default function ClubPage() {
         {/* PROFILE */}
         {view === 'profile' && profileMember && <div style={{ paddingBottom: 80 }}>
           <button className="profile-back" onClick={() => setView('feed')}>← Back</button>
-          <div className="profile-header"><MemberAvatar member={profileMember} size={88} /><div><div className="profile-name">{profileMember.first_name} {profileMember.last_name}</div><div className="profile-role">{profileMember.role || 'Member'}</div>{profileMember.avatar_figure && <div className="profile-figure">{getFigure(profileMember.avatar_figure).name}</div>}</div></div>
+          <div className="profile-header"><MemberAvatar member={profileMember} size={88} /><div><div className="profile-name">{profileMember.first_name} {profileMember.last_name}</div><div className="profile-role">{profileMember.role || 'Member'}</div>{profileMember.avatar_figure && <div className="profile-figure">{getFigure(profileMember.avatar_figure).name}</div>}<span style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--tc)', cursor: 'pointer', display: 'inline-block', marginTop: 6 }} onClick={() => router.push(`/profile/${profileMember.id}`)}>View writing &amp; full profile →</span></div></div>
           {(profileMember.fav_book || profileMember.one_word || profileMember.fav_cartoon) ? <div className="bio-grid">
             <div className="bio-card"><div className="bio-accent" style={{ background: 'var(--tc)' }} /><div className="bio-label">Favorite Book</div>{profileMember.fav_book ? <><div className="bio-book-title">{profileMember.fav_book}</div><div className="bio-book-author">{profileMember.fav_book_author}</div></> : <div className="bio-empty">Not shared yet</div>}</div>
             <div className="bio-card"><div className="bio-accent" style={{ background: 'var(--sg)' }} /><div className="bio-label">In one word</div>{profileMember.one_word ? <div className="bio-word">{profileMember.one_word}</div> : <div className="bio-empty">Not shared yet</div>}</div>
