@@ -8,6 +8,7 @@ export default function BookPage() {
   const { id } = router.query
   const [book, setBook] = useState(null)
   const [clubs, setClubs] = useState([])
+  const [bookKey, setBookKey] = useState(null)
 
   useEffect(() => { if (id) loadBook() }, [id])
 
@@ -15,6 +16,7 @@ export default function BookPage() {
     const { data: b } = await supabase.from('books').select('*').eq('id', id).single()
     if (b) {
       setBook(b)
+      setBookKey(b.book_key)
       const { data: allBooks } = await supabase.from('books').select('*, club:clubs(*)').eq('title', b.title)
       if (allBooks) setClubs(allBooks.map(ab => ab.club).filter(Boolean))
     }
@@ -41,6 +43,15 @@ export default function BookPage() {
             <div style={{ fontFamily: 'var(--ui)', fontSize: 16, color: 'var(--txD)', marginBottom: 24 }}>{book.author}</div>
             <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--tc)', fontWeight: 600 }}>{clubs.length} club{clubs.length !== 1 ? 's' : ''} reading this on unscripted</div>
           </div>
+
+          {clubs.length >= 2 && bookKey && <div style={{ background: 'var(--ink)', borderRadius: 14, padding: '20px 24px', marginBottom: 32, display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}
+            onClick={() => router.push(`/bridge/book/${encodeURIComponent(bookKey)}`)}>
+            <span style={{ fontSize: 22 }}>↗</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: '#F2EBE0' }}>Join the global conversation</div>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'rgba(242,235,224,0.6)' }}>Readers across {clubs.length} clubs are discussing this book together</div>
+            </div>
+          </div>}
 
           <div style={{ borderTop: '1px solid var(--bd)', paddingTop: 32 }}>
             <div className="section-title" style={{ marginBottom: 20 }}>Clubs Reading This</div>
