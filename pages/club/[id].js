@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
+import { signOut } from '../../lib/auth'
 import Logo from '../../components/Logo'
 import Tag from '../../components/Tag'
 
@@ -211,6 +212,7 @@ export default function ClubPage() {
             <button className="nav-btn" onClick={() => router.push('/')}>Explore</button>
             <button className="nav-btn active">{club.name}</button>
             {currentUser && <div className="user-nav"><MemberAvatar member={currentUser} size={32} /><span className="user-nav-name">{currentUser.first_name}</span></div>}
+            {currentUser && <button className="nav-btn" onClick={async () => { await signOut(); setCurrentUser(null); router.push('/') }}>Sign out</button>}
           </div>
         </nav>
 
