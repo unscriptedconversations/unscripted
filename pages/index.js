@@ -60,6 +60,7 @@ export default function Landing() {
           <div className="nav-links">
             <button className="nav-btn active">Explore</button>
             {currentUser && <button className="nav-btn" onClick={() => router.push('/write')}>Write</button>}
+            {currentUser && <button className="nav-btn" onClick={() => router.push('/club/new')}>+ Club</button>}
             {currentUser ? (
               <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
                 <span className="user-nav-name">{currentUser.first_name}</span>
