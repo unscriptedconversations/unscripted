@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
+import { signOut } from '../lib/auth'
 import Logo from '../components/Logo'
 
 export default function Landing() {
@@ -62,9 +63,12 @@ export default function Landing() {
             {currentUser && <button className="nav-btn" onClick={() => router.push('/write')}>Write</button>}
             {currentUser && <button className="nav-btn" onClick={() => router.push('/club/new')}>+ Club</button>}
             {currentUser ? (
-              <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
-                <span className="user-nav-name">{currentUser.first_name}</span>
-              </div>
+              <>
+                <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
+                  <span className="user-nav-name">{currentUser.first_name}</span>
+                </div>
+                <button className="nav-btn" onClick={async () => { await signOut(); setCurrentUser(null); router.push('/') }}>Sign out</button>
+              </>
             ) : (
               <button className="join-btn" onClick={() => router.push('/signup')}>Join</button>
             )}
