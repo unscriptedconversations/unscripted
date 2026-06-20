@@ -5,6 +5,8 @@ import Logo from '../components/Logo'
 
 const COLORS = ['#8B6E52', '#5E7A62', '#C27A5A', '#6B6590', '#52708B', '#7A5278', '#8B7E52', '#8B5E5E', '#8B6E6E']
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 export default function Signup() {
   const router = useRouter()
   const [mode, setMode] = useState(null)
@@ -24,6 +26,9 @@ export default function Signup() {
     setError('')
     if (!regData.first.trim() || !regData.last.trim() || !regData.email.trim() || !regData.password) {
       setError('All fields are required.'); return
+    }
+    if (!EMAIL_RE.test(regData.email.trim())) {
+      setError('Enter a valid email address.'); return
     }
     if (regData.password.length < 6) {
       setError('Password must be at least 6 characters.'); return
