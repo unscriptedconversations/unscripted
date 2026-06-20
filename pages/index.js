@@ -84,7 +84,7 @@ export default function Landing() {
                 <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
                   <span className="user-nav-name">{currentUser.first_name}</span>
                 </div>
-                <button className="nav-btn" onClick={async () => { await signOut(); setCurrentUser(null); router.push('/') }}>Sign out</button>
+                <button className="nav-btn" onClick={async () => { if (!window.confirm('Sign out of unscripted?')) return; await signOut(); setCurrentUser(null); router.push('/') }}>Sign out</button>
               </>
             ) : (
               <button className="join-btn" onClick={() => router.push('/signup')}>Join</button>
