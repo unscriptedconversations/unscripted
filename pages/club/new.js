@@ -19,7 +19,10 @@ export default function NewClub() {
   useEffect(() => {
     try { const sv = window.localStorage?.getItem?.('unscripted_user'); if (sv) setCurrentUser(JSON.parse(sv)) } catch (e) {}
     setCheckedAuth(true)
-  }, [])
+    if (router.query.title) {
+      setCD(d => ({ ...d, bookTitle: router.query.title, bookAuthor: router.query.author || '' }))
+    }
+  }, [router.query.title])
 
   function searchBook(val) {
     setBkQ(val)
