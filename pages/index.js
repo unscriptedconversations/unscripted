@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import { signOut } from '../lib/auth'
@@ -11,7 +11,10 @@ export default function Landing() {
   const [bridges, setBridges] = useState([])
   const [q, setQ] = useState('')
   const [sr, setSR] = useState(null)
+  const [extResults, setExtResults] = useState([])
+  const [extLoading, setExtLoading] = useState(false)
   const [currentUser, setCurrentUser] = useState(null)
+  const timer = useRef(null)
 
   useEffect(() => {
     loadData()
@@ -31,11 +34,25 @@ export default function Landing() {
 
   function doSearch(val) {
     setQ(val)
-    if (val.length < 2) { setSR(null); return }
+    if (val.length < 2) { setSR(null); setExtResults([]); return }
     const lv = val.toLowerCase()
     const clubHits = clubs.filter(c => c.name.toLowerCase().includes(lv))
     const bookHits = books.filter(b => b.title.toLowerCase().includes(lv))
     setSR({ clubs: clubHits, books: bookHits })
+
+    if (timer.current) clearTimeout(timer.current)
+    setExtLoading(true)
+    timer.current = setTimeout(async () => {
+      try {
+        const r = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(val)}&limit=5&fields=title,author_name,first_publish_year,cover_i`)
+        const d = await r.json()
+        const onPlatformTitles = new Set(books.map(b => b.title.toLowerCase()))
+        setExtResults((d.docs || [])
+          .filter(b => !onPlatformTitles.has((b.title || '').toLowerCase()))
+          .map(b => ({ title: b.title, author: (b.author_name || [])[0] || 'Unknown', year: b.first_publish_year, cover: b.cover_i ? `https://covers.openlibrary.org/b/id/${b.cover_i}-S.jpg` : null })))
+      } catch (e) { setExtResults([]) }
+      setExtLoading(false)
+    }, 400)
   }
 
   function getClubMemberCount(c) {
@@ -92,8 +109,8 @@ export default function Landing() {
             />
             <span style={{ position: 'absolute', left: 20, top: '50%', transform: 'translateY(-50%)', fontSize: 18 }}>🔍</span>
 
-            {sr && <div style={{ position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 400, overflowY: 'auto' }}>
-              {sr.clubs.length === 0 && sr.books.length === 0 && (
+            {sr && <div style={{ position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 440, overflowY: 'auto' }}>
+              {sr.clubs.length === 0 && sr.books.length === 0 && extResults.length === 0 && !extLoading && (
                 <div style={{ padding: 24, fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', textAlign: 'center' }}>No results for "{q}"</div>
               )}
               {sr.clubs.length > 0 && <div>
@@ -110,7 +127,7 @@ export default function Landing() {
                 ))}
               </div>}
               {sr.books.length > 0 && <div>
-                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Books</div>
+                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Books on unscripted</div>
                 {sr.books.map(b => (
                   <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
                     onClick={() => router.push(`/book/${b.id}`)}>
@@ -119,6 +136,21 @@ export default function Landing() {
                       <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</div>
                       <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.club ? ` · ${b.club.name}` : ''}</div>
                     </div>
+                  </div>
+                ))}
+              </div>}
+              {(extLoading || extResults.length > 0) && <div>
+                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Discover</div>
+                {extLoading && <div style={{ padding: '14px 24px', fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>Searching...</div>}
+                {extResults.map((b, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
+                    onClick={() => router.push(`/club/new?title=${encodeURIComponent(b.title)}&author=${encodeURIComponent(b.author)}`)}>
+                    {b.cover ? <img src={b.cover} style={{ width: 32, height: 44, borderRadius: 4, objectFit: 'cover' }} alt="" /> : <span style={{ fontSize: 20 }}>📖</span>}
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>{b.title}</div>
+                      <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.year ? ` · ${b.year}` : ''} · not on unscripted yet</div>
+                    </div>
+                    <span style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--tc)' }}>Start a club →</span>
                   </div>
                 ))}
               </div>}
