@@ -33,6 +33,7 @@ export default function ClubPage() {
   const { id } = router.query
 
   const [club, setClub] = useState(null)
+  const [notFound, setNotFound] = useState(false)
   const [members, setMembers] = useState([])
   const [books, setBooks] = useState([])
   const [threads, setThreads] = useState([])
@@ -71,6 +72,7 @@ export default function ClubPage() {
   async function loadClub() {
     const { data: c } = await supabase.from('clubs').select('*').eq('id', id).single()
     if (c) setClub(c)
+    else { setNotFound(true); return }
     const { data: cm } = await supabase.from('club_members').select('*, member:members(*)').eq('club_id', id)
     if (cm) setMembers(cm.map(x => x.member).filter(Boolean))
     const { data: bk } = await supabase.from('books').select('*').eq('club_id', id).order('display_order')
@@ -169,6 +171,15 @@ export default function ClubPage() {
   const getReplies = pid => tReplies.filter(r => r.parent_reply_id === pid)
   const tThemes = [...new Set(topLevelTP.flatMap(p => parseThemes(p.themes)))]
 
+  if (notFound) return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '0 28px' }}>
+      <div>
+        <div style={{ fontFamily: 'var(--hd)', fontSize: 24, fontStyle: 'italic', color: 'var(--txD)', marginBottom: 16 }}>This club doesn't exist.</div>
+        <button className="join-btn" onClick={() => router.push('/')}>← Back to Explore</button>
+      </div>
+    </div>
+  )
+
   if (!club) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontFamily: 'var(--ui)', color: 'var(--txD)' }}>Loading...</div></div>
 
   return (
@@ -212,7 +223,7 @@ export default function ClubPage() {
             <button className="nav-btn" onClick={() => router.push('/')}>Explore</button>
             <button className="nav-btn active">{club.name}</button>
             {currentUser && <div className="user-nav"><MemberAvatar member={currentUser} size={32} /><span className="user-nav-name">{currentUser.first_name}</span></div>}
-            {currentUser && <button className="nav-btn" onClick={async () => { await signOut(); setCurrentUser(null); router.push('/') }}>Sign out</button>}
+            {currentUser && <button className="nav-btn" onClick={async () => { if (!window.confirm('Sign out of unscripted?')) return; await signOut(); setCurrentUser(null); router.push('/') }}>Sign out</button>}
           </div>
         </nav>
 
