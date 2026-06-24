@@ -1,58 +1,56 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
-import { signOut } from '../lib/auth'
 import Logo from '../components/Logo'
 
 export default function Landing() {
   const router = useRouter()
   const [clubs, setClubs] = useState([])
   const [books, setBooks] = useState([])
-  const [bridges, setBridges] = useState([])
   const [q, setQ] = useState('')
   const [sr, setSR] = useState(null)
-  const [extResults, setExtResults] = useState([])
-  const [extLoading, setExtLoading] = useState(false)
   const [currentUser, setCurrentUser] = useState(null)
-  const timer = useRef(null)
 
   useEffect(() => {
     loadData()
-    try { const sv = window.localStorage?.getItem?.('unscripted_user'); if (sv) setCurrentUser(JSON.parse(sv)) } catch(e) {}
+
+    // Load session from Supabase Auth (replaces localStorage)
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) return
+      const { data: member } = await supabase
+        .from('members').select('*').eq('id', session.user.id).single()
+      if (member) setCurrentUser(member)
+    })
+
+    // Keep in sync on login/logout/OAuth
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session) {
+        const { data: member } = await supabase
+          .from('members').select('*').eq('id', session.user.id).single()
+        if (member) setCurrentUser(member)
+      } else {
+        setCurrentUser(null)
+      }
+    })
+    return () => subscription.unsubscribe()
   }, [])
 
   async function loadData() {
-    const [cR, bR, gR] = await Promise.all([
+    const [cR, bR] = await Promise.all([
       supabase.from('clubs').select('*, club_members(count), books(title, author, status)'),
       supabase.from('books').select('*, club:clubs(name)').order('created_at', { ascending: false }),
-      supabase.from('global_threads').select('*').order('club_count', { ascending: false }).limit(4),
     ])
     if (cR.data) setClubs(cR.data)
     if (bR.data) setBooks(bR.data)
-    if (gR.data) setBridges(gR.data)
   }
 
   function doSearch(val) {
     setQ(val)
-    if (val.length < 2) { setSR(null); setExtResults([]); return }
+    if (val.length < 2) { setSR(null); return }
     const lv = val.toLowerCase()
     const clubHits = clubs.filter(c => c.name.toLowerCase().includes(lv))
     const bookHits = books.filter(b => b.title.toLowerCase().includes(lv))
     setSR({ clubs: clubHits, books: bookHits })
-
-    if (timer.current) clearTimeout(timer.current)
-    setExtLoading(true)
-    timer.current = setTimeout(async () => {
-      try {
-        const r = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(val)}&limit=5&fields=title,author_name,first_publish_year,cover_i`)
-        const d = await r.json()
-        const onPlatformTitles = new Set(books.map(b => b.title.toLowerCase()))
-        setExtResults((d.docs || [])
-          .filter(b => !onPlatformTitles.has((b.title || '').toLowerCase()))
-          .map(b => ({ title: b.title, author: (b.author_name || [])[0] || 'Unknown', year: b.first_publish_year, cover: b.cover_i ? `https://covers.openlibrary.org/b/id/${b.cover_i}-S.jpg` : null })))
-      } catch (e) { setExtResults([]) }
-      setExtLoading(false)
-    }, 400)
   }
 
   function getClubMemberCount(c) {
@@ -77,17 +75,19 @@ export default function Landing() {
           <div className="brand"><Logo /></div>
           <div className="nav-links">
             <button className="nav-btn active">Explore</button>
-            {currentUser && <button className="nav-btn" onClick={() => router.push('/write')}>Write</button>}
-            {currentUser && <button className="nav-btn" onClick={() => router.push('/club/new')}>+ Club</button>}
             {currentUser ? (
-              <>
-                <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
-                  <span className="user-nav-name">{currentUser.first_name}</span>
-                </div>
-                <button className="nav-btn" onClick={async () => { if (!window.confirm('Sign out of unscripted?')) return; await signOut(); setCurrentUser(null); router.push('/') }}>Sign out</button>
-              </>
+              <div className="user-nav" onClick={async () => {
+                const { data: ms } = await supabase.from('club_members').select('club_id')
+                  .eq('member_id', currentUser.id).order('joined_at', { ascending: true }).limit(1).single()
+                router.push(ms?.club_id ? `/club/${ms.club_id}` : '/')
+              }}>
+                <span className="user-nav-name">{currentUser.first_name}</span>
+              </div>
             ) : (
-              <button className="join-btn" onClick={() => router.push('/signup')}>Join</button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <span style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 600, color: 'var(--ink)', cursor: 'pointer' }} onClick={() => router.push('/login')}>Log in</span>
+                <button className="join-btn" onClick={() => router.push('/signup')}>Join</button>
+              </div>
             )}
           </div>
         </nav>
@@ -109,8 +109,8 @@ export default function Landing() {
             />
             <span style={{ position: 'absolute', left: 20, top: '50%', transform: 'translateY(-50%)', fontSize: 18 }}>🔍</span>
 
-            {sr && <div style={{ position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 440, overflowY: 'auto' }}>
-              {sr.clubs.length === 0 && sr.books.length === 0 && extResults.length === 0 && !extLoading && (
+            {sr && <div style={{ position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 400, overflowY: 'auto' }}>
+              {sr.clubs.length === 0 && sr.books.length === 0 && (
                 <div style={{ padding: 24, fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', textAlign: 'center' }}>No results for "{q}"</div>
               )}
               {sr.clubs.length > 0 && <div>
@@ -127,7 +127,7 @@ export default function Landing() {
                 ))}
               </div>}
               {sr.books.length > 0 && <div>
-                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Books on unscripted</div>
+                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Books</div>
                 {sr.books.map(b => (
                   <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
                     onClick={() => router.push(`/book/${b.id}`)}>
@@ -136,21 +136,6 @@ export default function Landing() {
                       <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</div>
                       <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.club ? ` · ${b.club.name}` : ''}</div>
                     </div>
-                  </div>
-                ))}
-              </div>}
-              {(extLoading || extResults.length > 0) && <div>
-                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Discover</div>
-                {extLoading && <div style={{ padding: '14px 24px', fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>Searching...</div>}
-                {extResults.map((b, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
-                    onClick={() => router.push(`/club/new?title=${encodeURIComponent(b.title)}&author=${encodeURIComponent(b.author)}`)}>
-                    {b.cover ? <img src={b.cover} style={{ width: 32, height: 44, borderRadius: 4, objectFit: 'cover' }} alt="" /> : <span style={{ fontSize: 20 }}>📖</span>}
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>{b.title}</div>
-                      <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.year ? ` · ${b.year}` : ''} · not on unscripted yet</div>
-                    </div>
-                    <span style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--tc)' }}>Start a club →</span>
                   </div>
                 ))}
               </div>}
@@ -175,21 +160,6 @@ export default function Landing() {
             </div>
           </div>
         </section>
-
-        {/* GLOBAL CONVERSATIONS */}
-        {bridges.length > 0 && <section style={{ marginBottom: 48 }}>
-          <div className="section-title" style={{ marginBottom: 20 }}><i className="ti ti-world" style={{ marginRight: 6 }} />Global conversations</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
-            {bridges.map(b => (
-              <div key={b.id} style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '20px 22px', cursor: 'pointer' }}
-                onClick={() => router.push(`/bridge/${b.type}/${encodeURIComponent(b.ref)}`)}>
-                <span className="tag" style={{ background: b.type === 'book' ? 'var(--tcD)' : 'rgba(94,122,98,0.1)', color: b.type === 'book' ? 'var(--tc)' : 'var(--sg)' }}>{b.type}</span>
-                <div style={{ fontFamily: b.type === 'book' ? 'var(--hd)' : 'var(--ui)', fontStyle: b.type === 'book' ? 'italic' : 'normal', fontSize: 17, fontWeight: b.type === 'book' ? 600 : 700, color: 'var(--ink)', margin: '10px 0 4px' }}>{b.title}</div>
-                <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.club_count} club{b.club_count !== 1 ? 's' : ''} bridged</div>
-              </div>
-            ))}
-          </div>
-        </section>}
 
         {/* AD BANNER */}
         <a href="https://thelitbar.com" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', color: 'inherit' }}>
