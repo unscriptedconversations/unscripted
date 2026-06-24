@@ -1,51 +1,61 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
-import { ensureMemberProfile } from '../../lib/auth'
 import Logo from '../../components/Logo'
 
 export default function AuthCallback() {
   const router = useRouter()
-  const [status, setStatus] = useState('confirming')
+  const [status, setStatus] = useState('Signing you in…')
 
   useEffect(() => {
-    let cancelled = false
+    async function handleCallback() {
+      // Supabase automatically exchanges the code for a session from the URL hash
+      const { data: { session }, error } = await supabase.auth.getSession()
 
-    async function finish() {
-      // supabase-js auto-detects the session from the URL on load when
-      // detectSessionInUrl is enabled (default). Give it a moment, then check.
-      const { data: { session } } = await supabase.auth.getSession()
-      if (cancelled) return
-
-      if (!session) {
-        setStatus('error')
+      if (error || !session) {
+        setStatus('Something went wrong. Redirecting…')
+        setTimeout(() => router.replace('/login'), 2000)
         return
       }
 
-      await ensureMemberProfile(session.user)
-      if (cancelled) return
-      setStatus('done')
-      let dest = '/'
-      try {
-        const intent = window.localStorage?.getItem?.('unscripted_intent')
-        if (intent === 'host') dest = '/club/new'
-        window.localStorage?.removeItem?.('unscripted_intent')
-      } catch (e) {}
-      setTimeout(() => router.push(dest), 800)
+      // Check if a member profile exists for this auth user
+      const { data: member } = await supabase
+        .from('members')
+        .select('id')
+        .eq('id', session.user.id)
+        .single()
+
+      if (member) {
+        // Existing member — route to their first club
+        const { data: membership } = await supabase
+          .from('club_members')
+          .select('club_id')
+          .eq('member_id', member.id)
+          .order('joined_at', { ascending: true })
+          .limit(1)
+          .single()
+
+        setStatus('Welcome back.')
+        router.replace(membership?.club_id ? `/club/${membership.club_id}` : '/')
+      } else {
+        // New OAuth user — no member profile yet, send to finish setup
+        setStatus('Almost there…')
+        router.replace('/signup?oauth=true')
+      }
     }
 
-    finish()
-    return () => { cancelled = true }
+    handleCallback()
   }, [])
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '0 28px' }}>
-      <title>Confirming — unscripted</title>
-      <div>
-        <div style={{ marginBottom: 24 }}><Logo /></div>
-        {status === 'confirming' && <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)' }}>Confirming your email...</div>}
-        {status === 'done' && <div style={{ fontFamily: 'var(--hd)', fontSize: 22, fontStyle: 'italic', color: 'var(--ink)' }}>You're confirmed. Taking you in...</div>}
-        {status === 'error' && <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: '#A0603E' }}>That confirmation link didn't work — try logging in directly.</div>}
+    <div style={{
+      minHeight: '100vh', background: 'var(--bg)',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center', gap: 32,
+    }}>
+      <Logo />
+      <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)' }}>
+        {status}
       </div>
     </div>
   )
