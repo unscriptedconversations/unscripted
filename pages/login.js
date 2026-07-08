@@ -235,34 +235,4 @@ export default function Login() {
       </div>
     </div>
   )
-}le={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <title>Log in — unscripted</title>
-      <div style={{ maxWidth: 400, width: '100%', padding: '0 28px' }}>
-        <div style={{ marginBottom: 32, display: 'flex', justifyContent: 'center', cursor: 'pointer' }} onClick={() => router.push('/')}><Logo /></div>
-        <div style={{ fontFamily: 'var(--hd)', fontSize: 28, fontWeight: 600, color: 'var(--ink)', marginBottom: 32, textAlign: 'center' }}>Welcome back.</div>
-
-        {error && <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: '#A0603E', marginBottom: 16 }}>{error}</div>}
-
-        {unconfirmed ? (
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', lineHeight: 1.6, marginBottom: 20 }}>Your email isn't confirmed yet. Check your inbox for the confirmation link.</div>
-            <button style={btn} onClick={handleResend} disabled={resent}>{resent ? 'Email sent' : 'Resend confirmation email'}</button>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit}>
-            <label style={fl}>Email</label>
-            <input style={fi} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@email.com" required />
-            <label style={fl}>Password</label>
-            <input style={fi} type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Your password" required />
-            <button style={{ ...btn, opacity: loading ? 0.6 : 1 }} disabled={loading}>{loading ? 'Logging in...' : 'Log in'}</button>
-          </form>
-        )}
-
-        <div style={{ textAlign: 'center', marginTop: 24 }}>
-          <span style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>Don't have an account? </span>
-          <span style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--tc)', fontWeight: 600, cursor: 'pointer' }} onClick={() => router.push('/signup')}>Sign up</span>
-        </div>
-      </div>
-    </div>
-  )
 }
