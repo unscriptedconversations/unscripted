@@ -5,6 +5,7 @@ import Logo from '../components/Logo'
 
 export default function Login() {
   const router = useRouter()
+  const { redirect } = router.query  // e.g. /join/abc123
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPw, setShowPw] = useState(false)
@@ -75,7 +76,7 @@ export default function Login() {
           .order('joined_at', { ascending: true })
           .limit(1)
           .single()
-        router.push(membership?.club_id ? `/club/${membership.club_id}` : '/')
+        router.push(redirect || (membership?.club_id ? `/club/${membership.club_id}` : '/'))
       } else {
         // Auth user exists but no member profile — finish setup
         router.push('/signup?complete=true')
