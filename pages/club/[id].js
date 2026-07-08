@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
-import { signOut } from '../../lib/auth'
+import { FIGURES, getFigure } from '../../lib/figures'
 import Logo from '../../components/Logo'
 import Tag from '../../components/Tag'
 
@@ -21,6 +21,8 @@ function progressColor(pct) {
 }
 
 function MemberAvatar({ member, size = 36 }) {
+  const fig = member?.avatar_figure ? getFigure(member.avatar_figure) : null
+  if (fig) return <div style={{width:size,height:size,borderRadius:'50%',background:fig.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:size*0.5,flexShrink:0,border:'2px solid rgba(255,255,255,0.15)',cursor:'pointer'}}>{fig.icon}</div>
   return <div style={{width:size,height:size,borderRadius:'50%',background:member?.color||'#8B6E52',display:'flex',alignItems:'center',justifyContent:'center',fontSize:size*0.31,fontWeight:700,fontFamily:'var(--ui)',color:'#FFF',flexShrink:0,border:'2px solid rgba(255,255,255,0.15)',cursor:'pointer'}}>{member?.initials||'?'}</div>
 }
 
@@ -33,7 +35,6 @@ export default function ClubPage() {
   const { id } = router.query
 
   const [club, setClub] = useState(null)
-  const [notFound, setNotFound] = useState(false)
   const [members, setMembers] = useState([])
   const [books, setBooks] = useState([])
   const [threads, setThreads] = useState([])
@@ -63,18 +64,52 @@ export default function ClubPage() {
   const [newBook, setNewBook] = useState({ title: '', author: '', chapters: '', noCh: false })
   const timer = useRef(null)
 
+  // Settings form state
+  const [memberships, setMemberships] = useState([])
+  const [settingsName, setSettingsName] = useState('')
+  const [settingsDesc, setSettingsDesc] = useState('')
+  const [settingsSaved, setSettingsSaved] = useState(false)
+  const [leaveConfirm, setLeaveConfirm] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  // Settings form state
+  const [memberships, setMemberships] = useState([])
+  const [settingsName, setSettingsName] = useState('')
+  const [settingsDesc, setSettingsDesc] = useState('')
+  const [settingsSaved, setSettingsSaved] = useState(false)
+  const [leaveConfirm, setLeaveConfirm] = useState(false)
+  const [copied, setCopied] = useState(false)
+
   useEffect(() => {
-    try { const sv = window.localStorage?.getItem?.('unscripted_user'); if (sv) setCurrentUser(JSON.parse(sv)) } catch(e) {}
+    // Load session from Supabase Auth (replaces localStorage)
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) return
+      const { data: member } = await supabase
+        .from('members').select('*').eq('id', session.user.id).single()
+      if (member) setCurrentUser(member)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session) {
+        const { data: member } = await supabase
+          .from('members').select('*').eq('id', session.user.id).single()
+        if (member) setCurrentUser(member)
+      } else {
+        setCurrentUser(null)
+      }
+    })
+    return () => subscription.unsubscribe()
   }, [])
 
   useEffect(() => { if (id) loadClub() }, [id])
 
   async function loadClub() {
     const { data: c } = await supabase.from('clubs').select('*').eq('id', id).single()
-    if (c) setClub(c)
-    else { setNotFound(true); return }
+    if (c) { setClub(c); setSettingsName(c.name || ''); setSettingsDesc(c.description || '') }
     const { data: cm } = await supabase.from('club_members').select('*, member:members(*)').eq('club_id', id)
-    if (cm) setMembers(cm.map(x => x.member).filter(Boolean))
+    if (cm) {
+      setMembers(cm.map(x => x.member).filter(Boolean))
+      setMemberships(cm) // store full membership data including role
+    }
     const { data: bk } = await supabase.from('books').select('*').eq('club_id', id).order('display_order')
     if (bk) { setBooks(bk); if (!selBook && bk[0]) setSelBook(bk[0].id) }
     const { data: th } = await supabase.from('threads').select('*').order('chapter_number')
@@ -83,12 +118,6 @@ export default function ClubPage() {
     if (ps) setPosts(ps)
     const { data: lk } = await supabase.from('likes').select('*')
     if (lk) setLikes(lk)
-  }
-
-  async function joinThisClub() {
-    if (!currentUser || !club) return
-    await supabase.from('club_members').insert({ club_id: club.id, member_id: currentUser.id, role: 'member' })
-    loadClub()
   }
 
   async function loadThreadPosts(threadId) {
@@ -153,12 +182,44 @@ export default function ClubPage() {
     setShowAddBook(false); setNewBook({ title: '', author: '', chapters: '', noCh: false }); setBkQ(''); setBkR([]); loadClub()
   }
 
+  async function saveClubSettings() {
+    if (!club || !isHost) return
+    const { error } = await supabase.from('clubs').update({
+      name: settingsName.trim(),
+      description: settingsDesc.trim(),
+    }).eq('id', id)
+    if (!error) {
+      setClub(prev => ({ ...prev, name: settingsName.trim(), description: settingsDesc.trim() }))
+      setSettingsSaved(true)
+      setTimeout(() => setSettingsSaved(false), 2500)
+    }
+  }
+
+  async function leaveClub() {
+    if (!currentUser) return
+    await supabase.from('club_members').delete()
+      .eq('club_id', id).eq('member_id', currentUser.id)
+    await supabase.auth.signOut()
+    router.push('/')
+  }
+
+  async function copyInviteLink() {
+    const link = `${window.location.origin}/join/${club.invite_code}`
+    try { await navigator.clipboard.writeText(link) } catch { }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
   const isLiked = pid => currentUser && likes.some(l => l.post_id === pid && l.member_id === currentUser.id)
   const likeCount = pid => likes.filter(l => l.post_id === pid).length
   const parseThemes = str => (str || '').split(',').map(t => t.trim()).filter(Boolean)
 
   const openThread = t => { setActiveThread(t); setView('thread'); setReplyingTo(null); setExpandedReplies({}); loadThreadPosts(t.id) }
   const openProfile = m => { setProfileMember(m); setView('profile') }
+
+  const currentMembership = memberships.find(m => m.member_id === currentUser?.id)
+  const isHost = currentMembership?.role === 'host' || club?.creator_id === currentUser?.id
+  const isMember = !!currentMembership
 
   const curBook = books.find(b => b.status === 'current') || books[0]
   const activeBook = books.find(b => b.id === selBook) || curBook
@@ -170,15 +231,6 @@ export default function ClubPage() {
   const tReplies = threadPosts.filter(p => p.parent_reply_id)
   const getReplies = pid => tReplies.filter(r => r.parent_reply_id === pid)
   const tThemes = [...new Set(topLevelTP.flatMap(p => parseThemes(p.themes)))]
-
-  if (notFound) return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '0 28px' }}>
-      <div>
-        <div style={{ fontFamily: 'var(--hd)', fontSize: 24, fontStyle: 'italic', color: 'var(--txD)', marginBottom: 16 }}>This club doesn't exist.</div>
-        <button className="join-btn" onClick={() => router.push('/')}>← Back to Explore</button>
-      </div>
-    </div>
-  )
 
   if (!club) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontFamily: 'var(--ui)', color: 'var(--txD)' }}>Loading...</div></div>
 
@@ -222,8 +274,22 @@ export default function ClubPage() {
           <div className="nav-links">
             <button className="nav-btn" onClick={() => router.push('/')}>Explore</button>
             <button className="nav-btn active">{club.name}</button>
-            {currentUser && <div className="user-nav"><MemberAvatar member={currentUser} size={32} /><span className="user-nav-name">{currentUser.first_name}</span></div>}
-            {currentUser && <button className="nav-btn" onClick={async () => { if (!window.confirm('Sign out of unscripted?')) return; await signOut(); setCurrentUser(null); router.push('/') }}>Sign out</button>}
+            {currentUser ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <div className="user-nav" onClick={() => { setProfileMember(currentUser); setView('profile') }}>
+                  <MemberAvatar member={currentUser} size={32} />
+                  <span className="user-nav-name">{currentUser.first_name}</span>
+                </div>
+                <button
+                  onClick={async () => { await supabase.auth.signOut(); router.push('/') }}
+                  style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, letterSpacing: 1, color: 'var(--txD)', background: 'none', border: 'none', cursor: 'pointer', textTransform: 'uppercase' }}
+                >
+                  Log out
+                </button>
+              </div>
+            ) : (
+              <button className="join-btn" onClick={() => router.push('/login')}>Log in</button>
+            )}
           </div>
         </nav>
 
@@ -239,18 +305,17 @@ export default function ClubPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16, paddingBottom: 20, borderBottom: '1px solid var(--bd)' }}>
             <div style={{ display: 'flex' }}>{members.slice(0, 6).map((m, i) => <div key={m.id} style={{ marginLeft: i ? -6 : 0 }}><MemberAvatar member={m} size={28} /></div>)}</div>
             <span style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>{members.length} members</span>
-            {currentUser && !members.some(m => m.id === currentUser.id) && (
-              <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 8, padding: '9px 18px', cursor: 'pointer', marginLeft: 'auto' }} onClick={joinThisClub}>Join club</button>
-            )}
-            {!currentUser && (
-              <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 8, padding: '9px 18px', cursor: 'pointer', marginLeft: 'auto' }} onClick={() => router.push('/signup')}>Join to participate</button>
-            )}
           </div>
         </div>
 
         {/* CLUB TABS */}
         <div style={{ display: 'flex', borderBottom: '1px solid var(--bd)', marginBottom: 32 }}>
-          {[['feed', 'Feed'], ['disc', 'Bookshelf'], ['members', 'Members'], ['settings', 'Settings']].map(([k, l]) =>
+          {[
+            ['feed', 'Feed'],
+            ['disc', 'Bookshelf'],
+            ['members', 'Members'],
+            ...(isMember || isHost ? [['settings', 'Settings']] : []),
+          ].map(([k, l]) =>
             <button key={k} className={`nav-btn ${view === k ? 'active' : ''}`} style={{ padding: '14px 24px' }} onClick={() => { setView(k); setActiveThread(null); setProfileMember(null) }}>{l}</button>
           )}
         </div>
@@ -318,27 +383,125 @@ export default function ClubPage() {
             {members.map(m => <div key={m.id} className="feed-card" style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => openProfile(m)}>
               <MemberAvatar member={m} size={52} />
               <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)', marginTop: 14 }}>{m.first_name} {m.last_name}</div>
+              {m.avatar_figure && <div style={{ fontFamily: 'var(--hd)', fontSize: 12, fontStyle: 'italic', color: 'var(--txD)', marginTop: 4 }}>{getFigure(m.avatar_figure).name}</div>}
             </div>)}
           </div>
         </div>}
 
         {/* SETTINGS */}
         {view === 'settings' && <div style={{ maxWidth: 560, paddingBottom: 80 }}>
-          <h2 className="modal-title" style={{ fontSize: 24 }}>Club Settings</h2>
-          <label className="field-label">Club Name</label><input className="field-input" defaultValue={club.name} />
-          <label className="field-label">Description</label><input className="field-input" defaultValue={club.description} />
-          <label className="field-label">Invite Link</label>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 32 }}>
-            <div style={{ flex: 1, padding: '14px 18px', background: 'var(--bg)', border: '1px solid var(--bd2)', borderRadius: 10, fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txM)' }}>unscripted.club/join/{club.invite_code}</div>
-            <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '12px 18px', cursor: 'pointer' }}>Copy</button>
+          <div className="section-title" style={{ marginBottom: 36 }}>Settings</div>
+
+          {/* ── SECTION 1: Club Info (host only) ─────────────────────── */}
+          {isHost && <div style={{ marginBottom: 40 }}>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 20, paddingBottom: 10, borderBottom: '1px solid var(--bd)' }}>Club Info</div>
+            <label className="field-label">Club Name</label>
+            <input className="field-input" value={settingsName} onChange={e => setSettingsName(e.target.value)} />
+            <label className="field-label">Description</label>
+            <textarea className="field-input" value={settingsDesc} onChange={e => setSettingsDesc(e.target.value)} rows={3} style={{ resize: 'vertical' }} />
+            <button
+              onClick={saveClubSettings}
+              style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: settingsSaved ? 'var(--sg)' : 'var(--ink)', border: 'none', borderRadius: 10, padding: '13px 28px', cursor: 'pointer', transition: 'background 0.2s' }}
+            >
+              {settingsSaved ? 'Saved ✓' : 'Save changes'}
+            </button>
+          </div>}
+
+          {/* ── SECTION 2: Privacy & Invite ──────────────────────────── */}
+          <div style={{ marginBottom: 40 }}>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 20, paddingBottom: 10, borderBottom: '1px solid var(--bd)' }}>Privacy & Invite</div>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
+              {['invite', 'open'].map(p => (
+                <div key={p}
+                  style={{ flex: 1, padding: '16px 20px', borderRadius: 12, border: club.privacy === p ? '2px solid var(--tc)' : '1.5px solid var(--bd)', background: club.privacy === p ? 'rgba(194,122,90,0.04)' : 'var(--sf)', cursor: isHost ? 'pointer' : 'default', textAlign: 'center', opacity: isHost ? 1 : 0.7 }}
+                  onClick={async () => {
+                    if (!isHost) return
+                    await supabase.from('clubs').update({ privacy: p }).eq('id', id)
+                    setClub(prev => ({ ...prev, privacy: p }))
+                  }}
+                >
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, color: 'var(--ink)', marginBottom: 4 }}>{p === 'invite' ? 'Invite Only' : 'Open'}</div>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{p === 'invite' ? 'Members join via link' : 'Anyone can find & join'}</div>
+                </div>
+              ))}
+            </div>
+            <label className="field-label">Invite Link</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1, padding: '14px 18px', background: 'var(--bg)', border: '1px solid var(--bd2)', borderRadius: 10, fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txM)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {typeof window !== 'undefined' ? window.location.origin : 'https://www.unscriptedbook.club'}/join/{club.invite_code}
+              </div>
+              <button
+                onClick={copyInviteLink}
+                style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: copied ? 'var(--sg)' : 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '12px 18px', cursor: 'pointer', flexShrink: 0, transition: 'color 0.2s', minWidth: 80 }}
+              >
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
           </div>
-          <button className="modal-submit">Save Changes</button>
+
+          {/* ── SECTION 3: Members (host only) ───────────────────────── */}
+          {isHost && <div style={{ marginBottom: 40 }}>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 20, paddingBottom: 10, borderBottom: '1px solid var(--bd)' }}>Members</div>
+            {members.filter(m => m.id !== currentUser?.id).map(m => (
+              <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--bd)' }}>
+                <MemberAvatar member={m} size={32} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>{m.first_name} {m.last_name}</div>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{memberships.find(ms => ms.member_id === m.id)?.role || 'member'}</div>
+                </div>
+                <button
+                  onClick={async () => {
+                    if (!confirm(`Remove ${m.first_name} from this club?`)) return
+                    await supabase.from('club_members').delete().eq('club_id', id).eq('member_id', m.id)
+                    loadClub()
+                  }}
+                  style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 600, color: 'var(--txD)', background: 'none', border: '1px solid var(--bd2)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer' }}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>}
+
+          {/* ── SECTION 4: Danger Zone ────────────────────────────────── */}
+          <div>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: '#A0603E', marginBottom: 20, paddingBottom: 10, borderBottom: '1px solid rgba(160,96,62,0.2)' }}>Danger Zone</div>
+            {!leaveConfirm ? (
+              <button
+                onClick={() => setLeaveConfirm(true)}
+                style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#A0603E', background: 'rgba(160,96,62,0.06)', border: '1.5px solid rgba(160,96,62,0.3)', borderRadius: 10, padding: '13px 24px', cursor: 'pointer', width: '100%' }}
+              >
+                Leave this club
+              </button>
+            ) : (
+              <div style={{ background: 'rgba(160,96,62,0.06)', border: '1.5px solid rgba(160,96,62,0.2)', borderRadius: 14, padding: '24px' }}>
+                <div style={{ fontFamily: 'var(--hd)', fontSize: 18, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>Are you sure?</div>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.6, marginBottom: 20 }}>
+                  Your posts will stay but you'll need a new invite to rejoin {club.name}.
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    onClick={leaveClub}
+                    style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: '#A0603E', border: 'none', borderRadius: 10, padding: '13px 24px', cursor: 'pointer', flex: 1 }}
+                  >
+                    Yes, leave club
+                  </button>
+                  <button
+                    onClick={() => setLeaveConfirm(false)}
+                    style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 10, padding: '13px 24px', cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>}
 
         {/* PROFILE */}
         {view === 'profile' && profileMember && <div style={{ paddingBottom: 80 }}>
           <button className="profile-back" onClick={() => setView('feed')}>← Back</button>
-          <div className="profile-header"><MemberAvatar member={profileMember} size={88} /><div><div className="profile-name">{profileMember.first_name} {profileMember.last_name}</div><div className="profile-role">{profileMember.role || 'Member'}</div><span style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--tc)', cursor: 'pointer', display: 'inline-block', marginTop: 6 }} onClick={() => router.push(`/profile/${profileMember.id}`)}>View writing &amp; full profile →</span></div></div>
+          <div className="profile-header"><MemberAvatar member={profileMember} size={88} /><div><div className="profile-name">{profileMember.first_name} {profileMember.last_name}</div><div className="profile-role">{profileMember.role || 'Member'}</div>{profileMember.avatar_figure && <div className="profile-figure">{getFigure(profileMember.avatar_figure).name}</div>}</div></div>
           {(profileMember.fav_book || profileMember.one_word || profileMember.fav_cartoon) ? <div className="bio-grid">
             <div className="bio-card"><div className="bio-accent" style={{ background: 'var(--tc)' }} /><div className="bio-label">Favorite Book</div>{profileMember.fav_book ? <><div className="bio-book-title">{profileMember.fav_book}</div><div className="bio-book-author">{profileMember.fav_book_author}</div></> : <div className="bio-empty">Not shared yet</div>}</div>
             <div className="bio-card"><div className="bio-accent" style={{ background: 'var(--sg)' }} /><div className="bio-label">In one word</div>{profileMember.one_word ? <div className="bio-word">{profileMember.one_word}</div> : <div className="bio-empty">Not shared yet</div>}</div>
