@@ -10,6 +10,7 @@ export default function Landing() {
   const [q, setQ] = useState('')
   const [sr, setSR] = useState(null)
   const [currentUser, setCurrentUser] = useState(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     loadData()
@@ -42,6 +43,7 @@ export default function Landing() {
     ])
     if (cR.data) setClubs(cR.data)
     if (bR.data) setBooks(bR.data)
+    setLoading(false)
   }
 
   function doSearch(val) {
@@ -63,6 +65,10 @@ export default function Landing() {
   }
 
   const featuredClubs = clubs.filter(c => c.featured)
+  // Fallback: if no featured clubs, show top 3 by member count
+  const featuredDisplay = featuredClubs.length > 0
+    ? featuredClubs.slice(0, 3)
+    : [...clubs].sort((a, b) => getClubMemberCount(b) - getClubMemberCount(a)).slice(0, 3)
   const uniqueBooks = [...new Map(books.map(b => [b.title, b])).values()].slice(0, 6)
 
   return (
@@ -175,12 +181,12 @@ export default function Landing() {
         </a>
 
         {/* FEATURED CLUBS */}
-        {featuredClubs.length > 0 && <section style={{ marginBottom: 48 }}>
+        {!loading && featuredDisplay.length > 0 && <section style={{ marginBottom: 48 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <div className="section-title">Featured Clubs</div>
+            <div className="section-title">{featuredClubs.length > 0 ? 'Featured Clubs' : 'Active Clubs'}</div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
-            {featuredClubs.slice(0, 3).map(c => {
+            {featuredDisplay.map(c => {
               const cb = getClubCurrentBook(c)
               return (
                 <div key={c.id} style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 16, padding: 24, cursor: 'pointer', position: 'relative', overflow: 'hidden' }}
@@ -200,24 +206,55 @@ export default function Landing() {
         </section>}
 
         {/* TRENDING BOOKS */}
-        {uniqueBooks.length > 0 && <section style={{ marginBottom: 48 }}>
+        {!loading && <section style={{ marginBottom: 48 }}>
           <div className="section-title" style={{ marginBottom: 20 }}>Trending on Unscripted</div>
-          <div style={{ display: 'flex', gap: 14, overflowX: 'auto', scrollbarWidth: 'none' }}>
-            {uniqueBooks.map(b => (
-              <div key={b.id} style={{ minWidth: 180, background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '20px 18px', flexShrink: 0, cursor: 'pointer' }}
-                onClick={() => router.push(`/book/${b.id}`)}>
-                <div style={{ fontFamily: 'var(--hd)', fontSize: 16, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)', lineHeight: 1.25, marginBottom: 6 }}>{b.title}</div>
-                <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}</div>
-              </div>
-            ))}
-          </div>
+          {uniqueBooks.length > 0 ? (
+            <div style={{ display: 'flex', gap: 14, overflowX: 'auto', scrollbarWidth: 'none' }}>
+              {uniqueBooks.map(b => (
+                <div key={b.id} style={{ minWidth: 180, background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '20px 18px', flexShrink: 0, cursor: 'pointer' }}
+                  onClick={() => router.push(`/book/${b.id}`)}>
+                  <div style={{ fontFamily: 'var(--hd)', fontSize: 16, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)', lineHeight: 1.25, marginBottom: 6 }}>{b.title}</div>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 14 }}>
+              {['Literary Fiction', 'Memoir', 'Speculative Fiction'].map(genre => (
+                <div key={genre} style={{ minWidth: 180, background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 14, padding: '20px 18px', flexShrink: 0, opacity: 0.5 }}>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 8 }}>{genre}</div>
+                  <div style={{ fontFamily: 'var(--hd)', fontSize: 14, fontStyle: 'italic', color: 'var(--txD)', lineHeight: 1.4 }}>Start a club to see what the community is reading</div>
+                </div>
+              ))}
+            </div>
+          )}
         </section>}
 
         {/* ALL CLUBS + SIDEBAR ADS */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 32, marginBottom: 48 }}>
           <div>
             <div className="section-title" style={{ marginBottom: 20 }}>All Clubs</div>
-            {clubs.map(c => {
+            {loading && (
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', padding: '24px 0' }}>Loading clubs…</div>
+            )}
+            {!loading && clubs.length === 0 && (
+              <div style={{ background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 16, padding: '48px 32px', textAlign: 'center' }}>
+                <div style={{ fontSize: 40, marginBottom: 16 }}>📚</div>
+                <div style={{ fontFamily: 'var(--hd)', fontSize: 22, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>
+                  No clubs yet.
+                </div>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.6, marginBottom: 24 }}>
+                  Be the first to start a reading community on unscripted.
+                </div>
+                <button
+                  onClick={() => router.push('/signup')}
+                  style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 10, padding: '12px 24px', cursor: 'pointer' }}
+                >
+                  Start the first club
+                </button>
+              </div>
+            )}
+            {!loading && clubs.map(c => {
               const cb = getClubCurrentBook(c)
               return (
                 <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '18px 20px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 12, marginBottom: 10, cursor: 'pointer' }}
