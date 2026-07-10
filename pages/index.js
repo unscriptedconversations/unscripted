@@ -185,7 +185,7 @@ export default function Landing() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
             <div className="section-title">{featuredClubs.length > 0 ? 'Featured Clubs' : 'Active Clubs'}</div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+          <div className="featured-grid">
             {featuredDisplay.map(c => {
               const cb = getClubCurrentBook(c)
               return (
@@ -231,7 +231,7 @@ export default function Landing() {
         </section>}
 
         {/* ALL CLUBS + SIDEBAR ADS */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 32, marginBottom: 48 }}>
+        <div className="clubs-layout">
           <div>
             <div className="section-title" style={{ marginBottom: 20 }}>All Clubs</div>
             {loading && (
@@ -268,7 +268,7 @@ export default function Landing() {
               )
             })}
           </div>
-          <div>
+          <div className="clubs-sidebar">
             {[
               { t: 'Strand Bookstore', d: '18 miles of books since 1927.', url: 'https://strandbooks.com' },
               { t: 'Audible', d: 'Listen to your club\'s current read. First month free.', url: 'https://audible.com' },
