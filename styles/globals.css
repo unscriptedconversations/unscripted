@@ -276,3 +276,93 @@ body { background:var(--bg); font-family:var(--hd); color:var(--ink); -webkit-fo
 .bio-empty-state { padding:36px 0; border-bottom:1px solid var(--bd); margin-bottom:36px; background:var(--sf); border:1px dashed var(--bd2); border-radius:16px; padding:32px 24px; text-align:center; }
 .bio-empty-title { font-family:var(--hd); font-size:18px; font-style:italic; color:var(--txD); margin-bottom:8px; }
 .bio-empty-sub { font-family:var(--ui); font-size:12px; color:var(--txD); }
+
+
+/* ============================================================
+   UNSCRIPTED — MOBILE RESPONSIVE ADDITIONS
+   Paste at the bottom of your existing globals.css
+   ============================================================ */
+
+
+/* ── Homepage grids ─────────────────────────────────────────── */
+.featured-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.clubs-layout {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 32px;
+  margin-bottom: 48px;
+}
+
+/* ── Club page tab nav — scroll horizontally on mobile ──────── */
+.club-tab-nav {
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  border-bottom: 1px solid var(--bd);
+}
+.club-tab-nav::-webkit-scrollbar { display: none; }
+.club-tab-nav .nav-btn {
+  flex-shrink: 0;
+}
+
+/* ── Global shell padding ───────────────────────────────────── */
+@media (max-width: 768px) {
+  .shell {
+    padding: 0 18px;
+  }
+
+  /* Nav */
+  .topnav {
+    padding: 16px 0;
+  }
+
+  /* Hero */
+  .hero-h1 {
+    font-size: clamp(32px, 8vw, 56px) !important;
+  }
+
+  /* Featured clubs: 3-col → 1-col */
+  .featured-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* All clubs + sidebar: side-by-side → stacked, sidebar hidden */
+  .clubs-layout {
+    grid-template-columns: 1fr;
+  }
+  .clubs-sidebar {
+    display: none;
+  }
+
+  /* Section titles */
+  .section-title {
+    font-size: 18px !important;
+  }
+
+  /* Signup / auth pages: tighten vertical spacing */
+  .modal-title {
+    font-size: 22px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Extra tight on small phones */
+  .shell {
+    padding: 0 14px;
+  }
+
+  .hero-h1 {
+    font-size: 30px !important;
+  }
+
+  /* Join page club card */
+  .join-club-card {
+    padding: 28px 24px !important;
+  }
+}
