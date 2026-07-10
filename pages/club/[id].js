@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+           import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
 import { FIGURES, getFigure } from '../../lib/figures'
@@ -303,7 +303,7 @@ export default function ClubPage() {
         </div>
 
         {/* CLUB TABS */}
-        <div style={{ display: 'flex', borderBottom: '1px solid var(--bd)', marginBottom: 32 }}>
+        <div className="club-tab-nav" style={{ marginBottom: 32 }}>
           {[
             ['feed', 'Feed'],
             ['disc', 'Bookshelf'],
