@@ -74,12 +74,6 @@ export default function ClubPage() {
 
   // Settings form state
   const [memberships, setMemberships] = useState([])
-  const [settingsName, setSettingsName] = useState('')
-  const [settingsDesc, setSettingsDesc] = useState('')
-  const [settingsSaved, setSettingsSaved] = useState(false)
-  const [leaveConfirm, setLeaveConfirm] = useState(false)
-  const [inviteCopied, setInviteCopied] = useState(false)
-
   useEffect(() => {
     // Load session from Supabase Auth (replaces localStorage)
     supabase.auth.getSession().then(async ({ data: { session } }) => {
