@@ -70,7 +70,7 @@ export default function ClubPage() {
   const [settingsDesc, setSettingsDesc] = useState('')
   const [settingsSaved, setSettingsSaved] = useState(false)
   const [leaveConfirm, setLeaveConfirm] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [inviteCopied, setInviteCopied] = useState(false)
 
   // Settings form state
   const [memberships, setMemberships] = useState([])
@@ -78,7 +78,7 @@ export default function ClubPage() {
   const [settingsDesc, setSettingsDesc] = useState('')
   const [settingsSaved, setSettingsSaved] = useState(false)
   const [leaveConfirm, setLeaveConfirm] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [inviteCopied, setInviteCopied] = useState(false)
 
   useEffect(() => {
     // Load session from Supabase Auth (replaces localStorage)
@@ -206,8 +206,8 @@ export default function ClubPage() {
   async function copyInviteLink() {
     const link = `${window.location.origin}/join/${club.invite_code}`
     try { await navigator.clipboard.writeText(link) } catch { }
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    setInviteCopied(true)
+    setTimeout(() => setInviteCopied(false), 2000)
   }
 
   const isLiked = pid => currentUser && likes.some(l => l.post_id === pid && l.member_id === currentUser.id)
@@ -432,9 +432,9 @@ export default function ClubPage() {
               </div>
               <button
                 onClick={copyInviteLink}
-                style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: copied ? 'var(--sg)' : 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '12px 18px', cursor: 'pointer', flexShrink: 0, transition: 'color 0.2s', minWidth: 80 }}
+                style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: inviteCopied ? 'var(--sg)' : 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '12px 18px', cursor: 'pointer', flexShrink: 0, transition: 'color 0.2s', minWidth: 80 }}
               >
-                {copied ? 'Copied!' : 'Copy'}
+                {inviteCopied ? 'Copied!' : 'Copy'}
               </button>
             </div>
           </div>
