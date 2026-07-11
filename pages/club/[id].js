@@ -310,6 +310,16 @@ export default function ClubPage() {
     setShowAddBook(false); setNewBook({ title: '', author: '', chapters: '', noCh: false }); setBkQ(''); setBkR([]); loadClub()
   }
 
+  async function setBookChapter(bookId, ch) {
+    const b = books.find(x => x.id === bookId)
+    if (!b) return
+    const total = b.total_chapters || 0
+    const next = Math.max(0, Math.min(ch, total))
+    if (next === (b.current_chapter || 0)) return
+    await supabase.from('books').update({ current_chapter: next }).eq('id', bookId)
+    setBooks(prev => prev.map(x => x.id === bookId ? { ...x, current_chapter: next } : x))
+  }
+
   async function saveClubSettings() {
     if (!club || !isHost) return
     const { error } = await supabase.from('clubs').update({
@@ -396,6 +406,8 @@ export default function ClubPage() {
   const tReplies = threadPosts.filter(p => p.parent_reply_id)
   const getReplies = pid => tReplies.filter(r => r.parent_reply_id === pid)
   const tThemes = [...new Set(topLevelTP.flatMap(p => parseThemes(p.themes)))]
+
+  const stepBtn = { width: 30, height: 30, borderRadius: 8, border: '1.5px solid var(--bd2)', background: 'var(--sf)', color: 'var(--ink)', fontFamily: 'var(--ui)', fontSize: 18, fontWeight: 700, lineHeight: 1, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }
 
   if (!club) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontFamily: 'var(--ui)', color: 'var(--txD)' }}>Loading...</div></div>
 
@@ -584,6 +596,18 @@ export default function ClubPage() {
           {activeBook && <>
             <div className="disc-header"><div className="disc-title">{activeBook.title}</div></div>
             <div className="disc-meta">by {activeBook.author} · {activeChapterThreads.length} threads{activeOpenThread ? ' · Open discussion' : ''}</div>
+
+            {activeBook.total_chapters > 0 && <div style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '16px 20px', margin: '16px 0 24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Club progress</span>
+                {isHost && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button style={stepBtn} aria-label="Previous chapter" onClick={() => setBookChapter(activeBook.id, (activeBook.current_chapter || 0) - 1)}>−</button>
+                  <span style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--ink)', minWidth: 74, textAlign: 'center' }}>Ch {Math.min(activeBook.current_chapter || 0, activeBook.total_chapters)} / {activeBook.total_chapters}</span>
+                  <button style={stepBtn} aria-label="Next chapter" onClick={() => setBookChapter(activeBook.id, (activeBook.current_chapter || 0) + 1)}>+</button>
+                </div>}
+              </div>
+              <ChapterProgress book={activeBook} showLabel={!isHost} />
+            </div>}
 
             {activeBook.status === 'completed' && activeOpenThread && <div className="mode-toggle"><button className={`mode-btn ${discMode === 'chapters' ? 'act' : ''}`} onClick={() => setDiscMode('chapters')}>By Chapter</button><button className={`mode-btn ${discMode === 'open' ? 'act' : ''}`} onClick={() => setDiscMode('open')}>Open Discussion</button></div>}
 
