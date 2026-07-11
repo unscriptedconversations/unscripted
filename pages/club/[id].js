@@ -1,4 +1,4 @@
-    import { useState, useEffect, useRef } from 'react'
+  import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
 import { FIGURES, getFigure } from '../../lib/figures'
@@ -115,6 +115,7 @@ export default function ClubPage() {
   const [leaveConfirm, setLeaveConfirm] = useState(false)
   const [inviteCopied, setInviteCopied] = useState(false)
   const [profileReplyCount, setProfileReplyCount] = useState(0)
+  const [showHow, setShowHow] = useState(false)
 
   useEffect(() => {
     // Load session from Supabase Auth (replaces localStorage)
@@ -173,6 +174,13 @@ export default function ClubPage() {
     if (data) setThreadPosts(data)
   }
 
+  // Clears the new-member empty state once they contribute (per club).
+  async function markHasPosted() {
+    if (!currentUser || !currentMembership || currentMembership.has_posted) return
+    await supabase.from('club_members').update({ has_posted: true }).eq('club_id', id).eq('member_id', currentUser.id)
+    setMemberships(prev => prev.map(m => m.member_id === currentUser.id ? { ...m, has_posted: true } : m))
+  }
+
   // Writing streak: any post or thread reply counts as writing activity (once/day).
   async function bumpWriteStreak() {
     if (!currentUser) return
@@ -188,6 +196,7 @@ export default function ClubPage() {
     const tag = document.getElementById('club-tag-select')?.value || 'community'
     await supabase.from('posts').insert({ member_id: currentUser.id, content: newPost.trim(), tag, sitting_with: newSit.trim() || null, themes: newThemes.trim() || null, club_id: id })
     await bumpWriteStreak()
+    await markHasPosted()
     setNewPost(''); setNewSit(''); setNewThemes(''); loadClub()
   }
 
@@ -195,6 +204,7 @@ export default function ClubPage() {
     if (!threadNewPost.trim() || !currentUser || !activeThread) return
     await supabase.from('thread_replies').insert({ thread_id: activeThread.id, member_id: currentUser.id, content: threadNewPost.trim(), sitting_with: threadNewSit.trim() || null, themes: threadNewThemes.trim() || null })
     await bumpWriteStreak()
+    await markHasPosted()
     setThreadNewPost(''); setThreadNewSit(''); setThreadNewThemes(''); loadThreadPosts(activeThread.id)
   }
 
@@ -202,6 +212,7 @@ export default function ClubPage() {
     if (!replyText.trim() || !currentUser || !activeThread) return
     await supabase.from('thread_replies').insert({ thread_id: activeThread.id, member_id: currentUser.id, content: replyText.trim(), parent_reply_id: parentId })
     await bumpWriteStreak()
+    await markHasPosted()
     setReplyText(''); setReplyingTo(null); setExpandedReplies(p => ({ ...p, [parentId]: true })); loadThreadPosts(activeThread.id)
   }
 
@@ -390,8 +401,25 @@ export default function ClubPage() {
         {view === 'feed' && <div className="main-grid" style={{ paddingBottom: 80 }}>
           <div>
             <div className="section-title" style={{ marginBottom: 20 }}>The Feed</div>
+            {isMember && currentMembership && !currentMembership.has_posted && <div style={{ background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 16, padding: '32px 28px', marginBottom: 24, textAlign: 'center' }}>
+              <div style={{ fontSize: 40, marginBottom: 14 }}>{'\u270D\uFE0F'}</div>
+              <div style={{ fontFamily: 'var(--hd)', fontSize: 22, fontWeight: 600, color: 'var(--ink)', marginBottom: 10 }}>Your first word</div>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', lineHeight: 1.6, maxWidth: 440, margin: '0 auto 22px' }}>Don't just read to consume. Share your thoughts, sit with ideas, and build your voice — this room is better with you in it.</div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button onClick={() => document.getElementById('feed-compose')?.focus()} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--tc)', border: 'none', borderRadius: 10, padding: '12px 22px', cursor: 'pointer' }}>Write your first post</button>
+                <button onClick={() => setShowHow(v => !v)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 10, padding: '12px 22px', cursor: 'pointer' }}>{showHow ? 'Hide' : 'See how it works'}</button>
+              </div>
+              {showHow && <div style={{ textAlign: 'left', marginTop: 24, borderTop: '1px solid var(--bd)', paddingTop: 20, display: 'grid', gap: 16 }}>
+                {[['\uD83D\uDCAC', 'Post to the feed', 'Quick thoughts, questions, or reactions your whole club sees.'], ['\uD83D\uDCD6', 'Join a chapter thread', 'Go deep chapter by chapter in the Bookshelf tab — spoiler-safe.'], ['\uD83D\uDD25', 'Build a streak', 'Posting or visiting each day grows your writing and reading streaks.']].map(([icon, h, d]) => (
+                  <div key={h} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                    <span style={{ fontSize: 20, flexShrink: 0 }}>{icon}</span>
+                    <div><div style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>{h}</div><div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', lineHeight: 1.5 }}>{d}</div></div>
+                  </div>
+                ))}
+              </div>}
+            </div>}
             {allFeedThemes.length > 0 && <div className="theme-filter"><span className="section-title" style={{ marginRight: 8 }}>Themes</span><ThemePill t="All" active={!filterTheme} onClick={() => setFilterTheme(null)} />{allFeedThemes.map(t => <ThemePill key={t} t={t} active={filterTheme === t} onClick={() => setFilterTheme(filterTheme === t ? null : t)} />)}</div>}
-            {currentUser ? <div className="compose"><div className="compose-row"><MemberAvatar member={currentUser} size={36} /><textarea className="compose-input" placeholder="Say what's on your mind..." value={newPost} onChange={e => setNewPost(e.target.value)} rows={2} /></div><div className="compose-depth"><div className="compose-depth-label">Optional — add depth</div><div className="compose-depth-row"><span className="compose-depth-name">Sitting with</span><input className="compose-depth-input italic" placeholder="A line from the book..." value={newSit} onChange={e => setNewSit(e.target.value)} /></div><div className="compose-depth-row"><span className="compose-depth-name">Themes</span><input className="compose-depth-input" placeholder="survival, identity (comma separated)" value={newThemes} onChange={e => setNewThemes(e.target.value)} /></div></div><div className="compose-foot"><select className="tag-select" id="club-tag-select"><option value="community">Community</option><option value="reflection">Reflection</option><option value="book">Book</option></select><button className="share-btn" disabled={!newPost.trim()} onClick={submitPost}>Share</button></div></div> : <div className="compose compose-cta" onClick={() => router.push('/signup')}><p className="compose-placeholder">Join to share your thoughts...</p></div>}
+            {currentUser ? <div className="compose"><div className="compose-row"><MemberAvatar member={currentUser} size={36} /><textarea id="feed-compose" className="compose-input" placeholder="Say what's on your mind..." value={newPost} onChange={e => setNewPost(e.target.value)} rows={2} /></div><div className="compose-depth"><div className="compose-depth-label">Optional — add depth</div><div className="compose-depth-row"><span className="compose-depth-name">Sitting with</span><input className="compose-depth-input italic" placeholder="A line from the book..." value={newSit} onChange={e => setNewSit(e.target.value)} /></div><div className="compose-depth-row"><span className="compose-depth-name">Themes</span><input className="compose-depth-input" placeholder="survival, identity (comma separated)" value={newThemes} onChange={e => setNewThemes(e.target.value)} /></div></div><div className="compose-foot"><select className="tag-select" id="club-tag-select"><option value="community">Community</option><option value="reflection">Reflection</option><option value="book">Book</option></select><button className="share-btn" disabled={!newPost.trim()} onClick={submitPost}>Share</button></div></div> : <div className="compose compose-cta" onClick={() => router.push('/signup')}><p className="compose-placeholder">Join to share your thoughts...</p></div>}
             {filteredPosts.map(p => { const m = p.member || {}; const th = parseThemes(p.themes); return <div key={p.id} className="feed-card"><div className="feed-header"><MemberAvatar member={m} size={32} /><div><span className="feed-name" onClick={() => openProfile(m)}>{m.first_name}</span><span className="feed-time">{timeAgo(p.created_at)}</span></div><span style={{ marginLeft: 'auto' }}><Tag tag={p.tag} /></span></div><div className="feed-body">{p.content}</div>{p.sitting_with && <div className="sitting-with"><div className="sitting-label">Sitting with</div><div className="sitting-text">"{p.sitting_with}"</div></div>}{th.length > 0 && <div className="theme-pills">{th.map(t => <ThemePill key={t} t={t} active={filterTheme === t} onClick={() => setFilterTheme(filterTheme === t ? null : t)} />)}</div>}<div className="feed-actions"><button className={`feed-action ${isLiked(p.id) ? 'liked' : ''}`} onClick={() => toggleLike(p.id)}>{isLiked(p.id) ? '\u2665' : '\u2661'} {likeCount(p.id)}</button></div></div> })}
           </div>
           <div className="sidebar">
