@@ -9,6 +9,7 @@ export default function Landing() {
   const [books, setBooks] = useState([])
   const [q, setQ] = useState('')
   const [sr, setSR] = useState(null)
+  const [srTab, setSrTab] = useState('all')
   const [currentUser, setCurrentUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -51,8 +52,13 @@ export default function Landing() {
     if (val.length < 2) { setSR(null); return }
     const lv = val.toLowerCase()
     const clubHits = clubs.filter(c => c.name.toLowerCase().includes(lv))
-    const bookHits = books.filter(b => b.title.toLowerCase().includes(lv))
+    const bookHits = books.filter(b =>
+      b.title.toLowerCase().includes(lv) ||
+      (b.author || '').toLowerCase().includes(lv) ||
+      (b.tags || []).some(t => t.toLowerCase().includes(lv))
+    )
     setSR({ clubs: clubHits, books: bookHits })
+    setSrTab('all')
   }
 
   function getClubMemberCount(c) {
@@ -109,17 +115,27 @@ export default function Landing() {
             <input
               className="field-input"
               style={{ marginBottom: 0, paddingLeft: 48, boxShadow: '0 4px 20px rgba(0,0,0,0.04)', borderRadius: 14, fontSize: 15 }}
-              placeholder="Search by club name or book title..."
+              placeholder="Search clubs, books, authors, or topics..."
               value={q}
               onChange={e => doSearch(e.target.value)}
             />
             <span style={{ position: 'absolute', left: 20, top: '50%', transform: 'translateY(-50%)', fontSize: 18 }}>🔍</span>
 
             {sr && <div style={{ position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 400, overflowY: 'auto' }}>
+              {(sr.clubs.length > 0 || sr.books.length > 0) && (
+                <div style={{ display: 'flex', gap: 6, padding: '12px 16px', borderBottom: '1px solid var(--bd)', position: 'sticky', top: 0, background: 'var(--sf)', zIndex: 1 }}>
+                  {[['all', 'All', sr.clubs.length + sr.books.length], ['clubs', 'Clubs', sr.clubs.length], ['books', 'Books', sr.books.length]].map(([k, label, n]) => (
+                    <button key={k} onClick={() => setSrTab(k)}
+                      style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: srTab === k ? 'var(--tc)' : 'var(--txD)', background: srTab === k ? 'var(--tcD)' : 'transparent', border: '1px solid ' + (srTab === k ? 'var(--tc)' : 'var(--bd)'), borderRadius: 100, padding: '6px 14px', cursor: 'pointer' }}>
+                      {label} {n}
+                    </button>
+                  ))}
+                </div>
+              )}
               {sr.clubs.length === 0 && sr.books.length === 0 && (
                 <div style={{ padding: 24, fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', textAlign: 'center' }}>No results for "{q}"</div>
               )}
-              {sr.clubs.length > 0 && <div>
+              {(srTab === 'all' || srTab === 'clubs') && sr.clubs.length > 0 && <div>
                 <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Clubs</div>
                 {sr.clubs.map(c => (
                   <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
@@ -132,7 +148,7 @@ export default function Landing() {
                   </div>
                 ))}
               </div>}
-              {sr.books.length > 0 && <div>
+              {(srTab === 'all' || srTab === 'books') && sr.books.length > 0 && <div>
                 <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Books</div>
                 {sr.books.map(b => (
                   <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
@@ -141,6 +157,9 @@ export default function Landing() {
                     <div style={{ flex: 1 }}>
                       <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</div>
                       <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.club ? ` · ${b.club.name}` : ''}</div>
+                      {(b.tags || []).length > 0 && <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
+                        {b.tags.slice(0, 3).map(t => <span key={t} style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 600, letterSpacing: 0.5, color: 'var(--sg)', background: 'rgba(94,122,98,0.1)', borderRadius: 100, padding: '2px 8px' }}>{t}</span>)}
+                      </div>}
                     </div>
                   </div>
                 ))}
