@@ -1,4 +1,4 @@
-           import { useState, useEffect, useRef } from 'react'
+    import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
 import { FIGURES, getFigure } from '../../lib/figures'
@@ -20,10 +20,53 @@ function progressColor(pct) {
   return '#B0A594'
 }
 
+// ── Streak logic ──────────────────────────────────────────────────────
+// Local-date string (YYYY-MM-DD) so streaks roll over at the reader's midnight.
+function localDateStr(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+// Whole calendar days from a→b (both YYYY-MM-DD).
+function daysBetween(aStr, bStr) {
+  const a = new Date(aStr + 'T00:00:00'), b = new Date(bStr + 'T00:00:00')
+  return Math.round((b - a) / 86400000)
+}
+// Given the stored last-activity date + current/longest streak, return the
+// next values. `changed:false` means today already counted — skip the write.
+function computeStreak(lastDate, streak = 0, longest = 0) {
+  const today = localDateStr()
+  if (!lastDate) return { streak: 1, longest: Math.max(longest, 1), date: today, changed: true }
+  const diff = daysBetween(lastDate, today)
+  if (diff <= 0) return { streak: streak || 1, longest, date: lastDate, changed: false } // same day
+  if (diff === 1) { const ns = (streak || 0) + 1; return { streak: ns, longest: Math.max(longest, ns), date: today, changed: true } }
+  return { streak: 1, longest: Math.max(longest, 1), date: today, changed: true } // gap → reset
+}
+
 function MemberAvatar({ member, size = 36 }) {
   const fig = member?.avatar_figure ? getFigure(member.avatar_figure) : null
   if (fig) return <div style={{width:size,height:size,borderRadius:'50%',background:fig.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:size*0.5,flexShrink:0,border:'2px solid rgba(255,255,255,0.15)',cursor:'pointer'}}>{fig.icon}</div>
   return <div style={{width:size,height:size,borderRadius:'50%',background:member?.color||'#8B6E52',display:'flex',alignItems:'center',justifyContent:'center',fontSize:size*0.31,fontWeight:700,fontFamily:'var(--ui)',color:'#FFF',flexShrink:0,border:'2px solid rgba(255,255,255,0.15)',cursor:'pointer'}}>{member?.initials||'?'}</div>
+}
+
+function StreakStats({ member }) {
+  const stats = [
+    { icon: '\u270D\uFE0F', n: member.write_streak || 0, label: 'day writing streak', longest: member.longest_write_streak || 0, color: 'var(--tc)' },
+    { icon: '\uD83D\uDCD6', n: member.read_streak || 0, label: 'day reading streak', longest: member.longest_read_streak || 0, color: 'var(--sg)' },
+  ]
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 28 }}>
+      {stats.map((s, i) => (
+        <div key={i} style={{ position: 'relative', overflow: 'hidden', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '18px 20px' }}>
+          <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 3, background: s.color }} />
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span style={{ fontSize: 20 }}>{s.icon}</span>
+            <span style={{ fontFamily: 'var(--hd)', fontSize: 30, fontWeight: 600, color: 'var(--ink)', lineHeight: 1 }}>{s.n}</span>
+          </div>
+          <div style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, color: 'var(--txD)', marginTop: 6 }}>{s.label}</div>
+          {s.longest > s.n && <div style={{ fontFamily: 'var(--ui)', fontSize: 10, color: 'var(--txM)', marginTop: 2 }}>Longest \u00B7 {s.longest} days</div>}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function ThemePill({ t, active, onClick }) {
@@ -71,9 +114,8 @@ export default function ClubPage() {
   const [settingsSaved, setSettingsSaved] = useState(false)
   const [leaveConfirm, setLeaveConfirm] = useState(false)
   const [inviteCopied, setInviteCopied] = useState(false)
+  const [profileReplyCount, setProfileReplyCount] = useState(0)
 
-  // Settings form state
-  const [memberships, setMemberships] = useState([])
   useEffect(() => {
     // Load session from Supabase Auth (replaces localStorage)
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -95,6 +137,18 @@ export default function ClubPage() {
   }, [])
 
   useEffect(() => { if (id) loadClub() }, [id])
+
+  // Reading streak: visiting the club page counts as reading activity (once/day).
+  useEffect(() => {
+    if (!currentUser || !id) return
+    const r = computeStreak(currentUser.last_read_date, currentUser.read_streak, currentUser.longest_read_streak)
+    if (!r.changed) return
+    const upd = { read_streak: r.streak, last_read_date: r.date, longest_read_streak: r.longest }
+    supabase.from('members').update(upd).eq('id', currentUser.id).then(() => {
+      setCurrentUser(prev => ({ ...prev, ...upd }))
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, id])
 
   async function loadClub() {
     const { data: c } = await supabase.from('clubs').select('*').eq('id', id).single()
@@ -119,22 +173,35 @@ export default function ClubPage() {
     if (data) setThreadPosts(data)
   }
 
+  // Writing streak: any post or thread reply counts as writing activity (once/day).
+  async function bumpWriteStreak() {
+    if (!currentUser) return
+    const r = computeStreak(currentUser.last_write_date, currentUser.write_streak, currentUser.longest_write_streak)
+    if (!r.changed) return
+    const upd = { write_streak: r.streak, last_write_date: r.date, longest_write_streak: r.longest }
+    await supabase.from('members').update(upd).eq('id', currentUser.id)
+    setCurrentUser(prev => ({ ...prev, ...upd }))
+  }
+
   async function submitPost() {
     if (!newPost.trim() || !currentUser) return
     const tag = document.getElementById('club-tag-select')?.value || 'community'
     await supabase.from('posts').insert({ member_id: currentUser.id, content: newPost.trim(), tag, sitting_with: newSit.trim() || null, themes: newThemes.trim() || null, club_id: id })
+    await bumpWriteStreak()
     setNewPost(''); setNewSit(''); setNewThemes(''); loadClub()
   }
 
   async function submitThreadPost() {
     if (!threadNewPost.trim() || !currentUser || !activeThread) return
     await supabase.from('thread_replies').insert({ thread_id: activeThread.id, member_id: currentUser.id, content: threadNewPost.trim(), sitting_with: threadNewSit.trim() || null, themes: threadNewThemes.trim() || null })
+    await bumpWriteStreak()
     setThreadNewPost(''); setThreadNewSit(''); setThreadNewThemes(''); loadThreadPosts(activeThread.id)
   }
 
   async function submitReply(parentId) {
     if (!replyText.trim() || !currentUser || !activeThread) return
     await supabase.from('thread_replies').insert({ thread_id: activeThread.id, member_id: currentUser.id, content: replyText.trim(), parent_reply_id: parentId })
+    await bumpWriteStreak()
     setReplyText(''); setReplyingTo(null); setExpandedReplies(p => ({ ...p, [parentId]: true })); loadThreadPosts(activeThread.id)
   }
 
@@ -209,11 +276,16 @@ export default function ClubPage() {
   const parseThemes = str => (str || '').split(',').map(t => t.trim()).filter(Boolean)
 
   const openThread = t => { setActiveThread(t); setView('thread'); setReplyingTo(null); setExpandedReplies({}); loadThreadPosts(t.id) }
-  const openProfile = m => { setProfileMember(m); setView('profile') }
+  const openProfile = async m => {
+    setProfileMember(m); setView('profile'); setProfileReplyCount(0)
+    const { count } = await supabase.from('thread_replies').select('id', { count: 'exact', head: true }).eq('member_id', m.id)
+    setProfileReplyCount(count || 0)
+  }
 
   const currentMembership = memberships.find(m => m.member_id === currentUser?.id)
   const isHost = currentMembership?.role === 'host' || club?.creator_id === currentUser?.id
   const isMember = !!currentMembership
+  const profilePostCount = profileMember ? posts.filter(p => p.member_id === profileMember.id).length : 0
 
   const curBook = books.find(b => b.status === 'current') || books[0]
   const activeBook = books.find(b => b.id === selBook) || curBook
@@ -270,7 +342,7 @@ export default function ClubPage() {
             <button className="nav-btn active">{club.name}</button>
             {currentUser ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <div className="user-nav" onClick={() => { setProfileMember(currentUser); setView('profile') }}>
+                <div className="user-nav" onClick={() => openProfile(currentUser)}>
                   <MemberAvatar member={currentUser} size={32} />
                   <span className="user-nav-name">{currentUser.first_name}</span>
                 </div>
@@ -495,7 +567,8 @@ export default function ClubPage() {
         {/* PROFILE */}
         {view === 'profile' && profileMember && <div style={{ paddingBottom: 80 }}>
           <button className="profile-back" onClick={() => setView('feed')}>← Back</button>
-          <div className="profile-header"><MemberAvatar member={profileMember} size={88} /><div><div className="profile-name">{profileMember.first_name} {profileMember.last_name}</div><div className="profile-role">{profileMember.role || 'Member'}</div>{profileMember.avatar_figure && <div className="profile-figure">{getFigure(profileMember.avatar_figure).name}</div>}</div></div>
+          <div className="profile-header"><MemberAvatar member={profileMember} size={88} /><div><div className="profile-name">{profileMember.first_name} {profileMember.last_name}</div><div className="profile-role">{profileMember.role || 'Member'}</div>{profileMember.avatar_figure && <div className="profile-figure">{getFigure(profileMember.avatar_figure).name}</div>}<div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', marginTop: 8 }}>{profilePostCount} {profilePostCount === 1 ? 'post' : 'posts'} \u00B7 {profileReplyCount} {profileReplyCount === 1 ? 'reply' : 'replies'}</div></div></div>
+          <StreakStats member={profileMember} />
           {(profileMember.fav_book || profileMember.one_word || profileMember.fav_cartoon) ? <div className="bio-grid">
             <div className="bio-card"><div className="bio-accent" style={{ background: 'var(--tc)' }} /><div className="bio-label">Favorite Book</div>{profileMember.fav_book ? <><div className="bio-book-title">{profileMember.fav_book}</div><div className="bio-book-author">{profileMember.fav_book_author}</div></> : <div className="bio-empty">Not shared yet</div>}</div>
             <div className="bio-card"><div className="bio-accent" style={{ background: 'var(--sg)' }} /><div className="bio-label">In one word</div>{profileMember.one_word ? <div className="bio-word">{profileMember.one_word}</div> : <div className="bio-empty">Not shared yet</div>}</div>
