@@ -41,6 +41,27 @@ function computeStreak(lastDate, streak = 0, longest = 0) {
   return { streak: 1, longest: Math.max(longest, 1), date: today, changed: true } // gap → reset
 }
 
+const MUTE_OPTS = [
+  ['For 15 minutes', 15 * 60 * 1000],
+  ['For 1 hour', 60 * 60 * 1000],
+  ['For 3 hours', 3 * 60 * 60 * 1000],
+  ['For 8 hours', 8 * 60 * 60 * 1000],
+  ['For 24 hours', 24 * 60 * 60 * 1000],
+  ['Until I turn it back on', 'forever'],
+]
+function muteLabel(val) {
+  if (!val) return null
+  const d = new Date(val)
+  if (d.getFullYear() > 9000) return 'Muted'
+  return 'Muted until ' + d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+function SheetRow({ icon, label, danger, onClick }) {
+  return <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%', padding: '15px 16px', background: 'none', border: 'none', borderRadius: 12, cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--ui)', fontSize: 15, fontWeight: 600, color: danger ? '#A0603E' : 'var(--ink)' }}>
+    {icon && <span style={{ fontSize: 18, width: 22, textAlign: 'center', flexShrink: 0 }}>{icon}</span>}
+    <span>{label}</span>
+  </button>
+}
+
 function MemberAvatar({ member, size = 36 }) {
   const fig = member?.avatar_figure ? getFigure(member.avatar_figure) : null
   if (fig) return <div style={{width:size,height:size,borderRadius:'50%',background:fig.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:size*0.5,flexShrink:0,border:'2px solid rgba(255,255,255,0.15)',cursor:'pointer'}}>{fig.icon}</div>
@@ -116,6 +137,7 @@ export default function ClubPage() {
   const [inviteCopied, setInviteCopied] = useState(false)
   const [profileReplyCount, setProfileReplyCount] = useState(0)
   const [showHow, setShowHow] = useState(false)
+  const [actionSheet, setActionSheet] = useState(null)
   const [showEditProfile, setShowEditProfile] = useState(false)
   const [showFigPicker, setShowFigPicker] = useState(false)
   const [editForm, setEditForm] = useState({ fav_book: '', fav_book_author: '', one_word: '', fav_cartoon: '', avatar_figure: null })
@@ -182,6 +204,22 @@ export default function ClubPage() {
     if (!currentUser || !currentMembership || currentMembership.has_posted) return
     await supabase.from('club_members').update({ has_posted: true }).eq('club_id', id).eq('member_id', currentUser.id)
     setMemberships(prev => prev.map(m => m.member_id === currentUser.id ? { ...m, has_posted: true } : m))
+  }
+
+  async function applyMute(ms) {
+    if (!currentUser) return
+    const val = ms === null ? null : ms === 'forever' ? '9999-12-31T00:00:00Z' : new Date(Date.now() + ms).toISOString()
+    await supabase.from('club_members').update({ muted_until: val }).eq('club_id', id).eq('member_id', currentUser.id)
+    setMemberships(prev => prev.map(m => m.member_id === currentUser.id ? { ...m, muted_until: val } : m))
+    setActionSheet(null)
+  }
+
+  async function markFeedRead() {
+    if (!currentUser) return
+    const now = new Date().toISOString()
+    await supabase.from('club_members').update({ last_visited_at: now }).eq('club_id', id).eq('member_id', currentUser.id)
+    setMemberships(prev => prev.map(m => m.member_id === currentUser.id ? { ...m, last_visited_at: now } : m))
+    setActionSheet(null)
   }
 
   // Writing streak: any post or thread reply counts as writing activity (once/day).
@@ -327,6 +365,8 @@ export default function ClubPage() {
   }
 
   const currentMembership = memberships.find(m => m.member_id === currentUser?.id)
+  const muteVal = currentMembership?.muted_until
+  const isMuted = muteVal && new Date(muteVal) > new Date()
   const isHost = currentMembership?.role === 'host' || club?.creator_id === currentUser?.id
   const isMember = !!currentMembership
   const profilePostCount = profileMember ? posts.filter(p => p.member_id === profileMember.id).length : 0
@@ -413,6 +453,28 @@ export default function ClubPage() {
         </div>
       </div>}
 
+      {/* CLUB ACTION SHEET */}
+      {actionSheet && <div onClick={() => setActionSheet(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(26,31,46,0.4)', zIndex: 200, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+        <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 480, background: 'var(--sf)', borderRadius: '20px 20px 0 0', padding: '12px 12px 24px', boxShadow: '0 -8px 40px rgba(0,0,0,0.2)' }}>
+          <div style={{ width: 40, height: 4, borderRadius: 100, background: 'var(--bd2)', margin: '4px auto 12px' }} />
+          {actionSheet === 'main' ? <>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', padding: '4px 16px 10px' }}>{club.name}</div>
+            {isMuted
+              ? <SheetRow icon={'\uD83D\uDD14'} label="Unmute notifications" onClick={() => applyMute(null)} />
+              : <SheetRow icon={'\uD83D\uDD15'} label="Mute notifications" onClick={() => setActionSheet('mute')} />}
+            <SheetRow icon={'\u2713'} label="Mark feed as read" onClick={markFeedRead} />
+            {(isMember || isHost) && <SheetRow icon={'\u2699'} label="Club settings" onClick={() => { setView('settings'); setActionSheet(null) }} />}
+            <SheetRow icon={'\u21A9'} label="Leave club" danger onClick={() => { setView('settings'); setLeaveConfirm(true); setActionSheet(null) }} />
+          </> : <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 8px 10px' }}>
+              <button onClick={() => setActionSheet('main')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>← Back</button>
+              <span style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Mute {club.name} for…</span>
+            </div>
+            {MUTE_OPTS.map(([label, ms]) => <SheetRow key={label} label={label} onClick={() => applyMute(ms)} />)}
+          </>}
+        </div>
+      </div>}
+
       <div className="shell">
         {/* NAV */}
         <nav className="topnav">
@@ -441,9 +503,11 @@ export default function ClubPage() {
 
         {/* CLUB HEADER */}
         <div style={{ padding: '40px 0 0' }}>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
             <span className="tag" style={{ background: club.privacy === 'open' ? 'rgba(94,122,98,0.1)' : 'var(--tcD)', color: club.privacy === 'open' ? 'var(--sg)' : 'var(--tc)' }}>{club.privacy}</span>
             {club.featured && <span className="tag" style={{ background: 'var(--tcD)', color: 'var(--tc)' }}>featured</span>}
+            {isMuted && <span className="tag" style={{ background: 'var(--sf2)', color: 'var(--txD)' }}>{'\uD83D\uDD15'} {muteLabel(muteVal)}</span>}
+            {(isMember || isHost) && <button onClick={() => setActionSheet('main')} aria-label="Club options" style={{ marginLeft: 'auto', fontFamily: 'var(--ui)', fontSize: 20, fontWeight: 700, lineHeight: 1, color: 'var(--txD)', background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 8, width: 36, height: 32, cursor: 'pointer' }}>⋯</button>}
           </div>
           <div style={{ fontFamily: 'var(--hd)', fontSize: 36, fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>{club.name}</div>
           <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)' }}>{club.description}</div>
