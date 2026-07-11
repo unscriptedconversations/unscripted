@@ -1,4 +1,4 @@
-  import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
 import { FIGURES, getFigure } from '../../lib/figures'
@@ -116,6 +116,9 @@ export default function ClubPage() {
   const [inviteCopied, setInviteCopied] = useState(false)
   const [profileReplyCount, setProfileReplyCount] = useState(0)
   const [showHow, setShowHow] = useState(false)
+  const [showEditProfile, setShowEditProfile] = useState(false)
+  const [showFigPicker, setShowFigPicker] = useState(false)
+  const [editForm, setEditForm] = useState({ fav_book: '', fav_book_author: '', one_word: '', fav_cartoon: '', avatar_figure: null })
 
   useEffect(() => {
     // Load session from Supabase Auth (replaces localStorage)
@@ -293,6 +296,36 @@ export default function ClubPage() {
     setProfileReplyCount(count || 0)
   }
 
+  function openEditProfile() {
+    if (!currentUser) return
+    setEditForm({
+      fav_book: currentUser.fav_book || '',
+      fav_book_author: currentUser.fav_book_author || '',
+      one_word: currentUser.one_word || '',
+      fav_cartoon: currentUser.fav_cartoon || '',
+      avatar_figure: currentUser.avatar_figure || null,
+    })
+    setShowFigPicker(false)
+    setShowEditProfile(true)
+  }
+
+  async function saveProfile() {
+    if (!currentUser) return
+    const upd = {
+      fav_book: editForm.fav_book.trim() || null,
+      fav_book_author: editForm.fav_book_author.trim() || null,
+      one_word: editForm.one_word.trim() || null,
+      fav_cartoon: editForm.fav_cartoon.trim() || null,
+      avatar_figure: editForm.avatar_figure || null,
+    }
+    const { error } = await supabase.from('members').update(upd).eq('id', currentUser.id)
+    if (error) return
+    setCurrentUser(prev => ({ ...prev, ...upd }))
+    setProfileMember(prev => (prev && prev.id === currentUser.id) ? { ...prev, ...upd } : prev)
+    setMembers(prev => prev.map(m => m.id === currentUser.id ? { ...m, ...upd } : m))
+    setShowEditProfile(false); setShowFigPicker(false)
+  }
+
   const currentMembership = memberships.find(m => m.member_id === currentUser?.id)
   const isHost = currentMembership?.role === 'host' || club?.creator_id === currentUser?.id
   const isMember = !!currentMembership
@@ -341,6 +374,42 @@ export default function ClubPage() {
             {!newBook.noCh && <div style={{ marginTop: 16 }}><label className="field-label">How many chapters?</label><input className="field-input" style={{ marginBottom: 0 }} type="number" placeholder="e.g. 12" value={newBook.chapters} onChange={e => setNewBook(d => ({ ...d, chapters: e.target.value }))} /></div>}
           </div>}
           <button className="modal-submit" onClick={addBook}>Add book</button>
+        </div>
+      </div>}
+
+      {/* EDIT PROFILE MODAL */}
+      {showEditProfile && <div className="modal-overlay" onClick={() => setShowEditProfile(false)}>
+        <div className="modal-box" onClick={e => e.stopPropagation()}>
+          <button className="modal-close" onClick={() => setShowEditProfile(false)}>×</button>
+          <h2 className="modal-title" style={{ fontSize: 28 }}>Edit your profile</h2>
+          <p className="modal-sub">This is how every club sees you.</p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginBottom: 20 }}>
+            <div onClick={() => setShowFigPicker(v => !v)} style={{ cursor: 'pointer' }}>
+              <MemberAvatar member={{ avatar_figure: editForm.avatar_figure, color: currentUser?.color, initials: currentUser?.initials }} size={88} />
+            </div>
+            <button onClick={() => setShowFigPicker(v => !v)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--tc)', background: 'none', border: 'none', cursor: 'pointer' }}>{showFigPicker ? 'Close picker' : 'Change avatar'}</button>
+          </div>
+
+          {showFigPicker && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(64px, 1fr))', gap: 12, maxHeight: 220, overflowY: 'auto', marginBottom: 24, padding: 4 }}>
+            {FIGURES.map(f => (
+              <div key={f.id} onClick={() => setEditForm(d => ({ ...d, avatar_figure: f.id }))} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <div style={{ width: 48, height: 48, borderRadius: '50%', background: f.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, border: editForm.avatar_figure === f.id ? '3px solid var(--tc)' : '2px solid rgba(255,255,255,0.15)', boxShadow: editForm.avatar_figure === f.id ? '0 0 0 2px var(--tcD)' : 'none' }}>{f.icon}</div>
+                <span style={{ fontFamily: 'var(--ui)', fontSize: 9, color: 'var(--txD)', textAlign: 'center', lineHeight: 1.1 }}>{f.name}</span>
+              </div>
+            ))}
+          </div>}
+
+          <label className="field-label">Favorite book</label>
+          <input className="field-input" value={editForm.fav_book} onChange={e => setEditForm(d => ({ ...d, fav_book: e.target.value }))} placeholder="A book that shaped you" />
+          <label className="field-label">Author</label>
+          <input className="field-input" value={editForm.fav_book_author} onChange={e => setEditForm(d => ({ ...d, fav_book_author: e.target.value }))} placeholder="Who wrote it" />
+          <label className="field-label">In one word</label>
+          <input className="field-input" value={editForm.one_word} onChange={e => setEditForm(d => ({ ...d, one_word: e.target.value }))} placeholder="Describe yourself as a reader" />
+          <label className="field-label">Cartoon character</label>
+          <input className="field-input" value={editForm.fav_cartoon} onChange={e => setEditForm(d => ({ ...d, fav_cartoon: e.target.value }))} placeholder="Your spirit character" />
+
+          <button className="modal-submit" onClick={saveProfile}>Save changes</button>
         </div>
       </div>}
 
@@ -594,7 +663,10 @@ export default function ClubPage() {
 
         {/* PROFILE */}
         {view === 'profile' && profileMember && <div style={{ paddingBottom: 80 }}>
-          <button className="profile-back" onClick={() => setView('feed')}>← Back</button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <button className="profile-back" onClick={() => setView('feed')}>← Back</button>
+            {profileMember.id === currentUser?.id && <button onClick={openEditProfile} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--tc)', background: 'var(--tcD)', border: '1.5px solid var(--tc)', borderRadius: 8, padding: '8px 16px', cursor: 'pointer' }}>Edit profile</button>}
+          </div>
           <div className="profile-header"><MemberAvatar member={profileMember} size={88} /><div><div className="profile-name">{profileMember.first_name} {profileMember.last_name}</div><div className="profile-role">{profileMember.role || 'Member'}</div>{profileMember.avatar_figure && <div className="profile-figure">{getFigure(profileMember.avatar_figure).name}</div>}<div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', marginTop: 8 }}>{profilePostCount} {profilePostCount === 1 ? 'post' : 'posts'} \u00B7 {profileReplyCount} {profileReplyCount === 1 ? 'reply' : 'replies'}</div></div></div>
           <StreakStats member={profileMember} />
           {(profileMember.fav_book || profileMember.one_word || profileMember.fav_cartoon) ? <div className="bio-grid">
