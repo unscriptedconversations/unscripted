@@ -10,6 +10,7 @@ export default function Landing() {
   const [q, setQ] = useState('')
   const [sr, setSR] = useState(null)
   const [srTab, setSrTab] = useState('all')
+  const [activeMap, setActiveMap] = useState({})
   const [currentUser, setCurrentUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -38,12 +39,24 @@ export default function Landing() {
   }, [])
 
   async function loadData() {
-    const [cR, bR] = await Promise.all([
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    const [cR, bR, pR] = await Promise.all([
       supabase.from('clubs').select('*, club_members(count), books(title, author, status)'),
       supabase.from('books').select('*, club:clubs(name)').order('created_at', { ascending: false }),
+      supabase.from('posts').select('club_id, member_id').gte('created_at', since),
     ])
     if (cR.data) setClubs(cR.data)
     if (bR.data) setBooks(bR.data)
+    if (pR.data) {
+      const seen = {}
+      for (const p of pR.data) {
+        if (!p.club_id) continue
+        ;(seen[p.club_id] = seen[p.club_id] || new Set()).add(p.member_id)
+      }
+      const map = {}
+      for (const k in seen) map[k] = seen[k].size
+      setActiveMap(map)
+    }
     setLoading(false)
   }
 
@@ -68,6 +81,12 @@ export default function Landing() {
   function getClubCurrentBook(c) {
     const b = (c.books || []).find(b => b.status === 'current')
     return b || (c.books || [])[0]
+  }
+
+  function activeBadge(c) {
+    const n = activeMap[c.id] || 0
+    if (!n) return null
+    return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, color: 'var(--sg)' }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--sg)' }} />{n} active this week</span>
   }
 
   const featuredClubs = clubs.filter(c => c.featured)
@@ -143,6 +162,7 @@ export default function Landing() {
                     <div style={{ flex: 1 }}>
                       <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>{c.name}</div>
                       <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{getClubMemberCount(c)} members</div>
+                      {activeBadge(c)}
                     </div>
                     <span className="tag" style={{ background: c.privacy === 'open' ? 'rgba(94,122,98,0.1)' : 'var(--tcD)', color: c.privacy === 'open' ? 'var(--sg)' : 'var(--tc)' }}>{c.privacy}</span>
                   </div>
@@ -217,7 +237,10 @@ export default function Landing() {
                     <div style={{ fontFamily: 'var(--ui)', fontSize: 8, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>Reading</div>
                     <div style={{ fontFamily: 'var(--hd)', fontSize: 14, fontWeight: 600, fontStyle: 'italic', color: '#FFF' }}>{cb.title}</div>
                   </div>}
-                  <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{getClubMemberCount(c)} members</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{getClubMemberCount(c)} members</span>
+                    {activeBadge(c)}
+                  </div>
                 </div>
               )
             })}
@@ -281,6 +304,7 @@ export default function Landing() {
                   <div style={{ flex: 1 }}>
                     <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>{c.name}</div>
                     <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{cb ? cb.title + ' · ' : ''}{getClubMemberCount(c)} members</div>
+                    {activeBadge(c)}
                   </div>
                   <span className="tag" style={{ background: c.privacy === 'open' ? 'rgba(94,122,98,0.1)' : 'var(--tcD)', color: c.privacy === 'open' ? 'var(--sg)' : 'var(--tc)' }}>{c.privacy}</span>
                 </div>
