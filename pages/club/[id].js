@@ -68,6 +68,21 @@ function MemberAvatar({ member, size = 36 }) {
   return <div style={{width:size,height:size,borderRadius:'50%',background:member?.color||'#8B6E52',display:'flex',alignItems:'center',justifyContent:'center',fontSize:size*0.31,fontWeight:700,fontFamily:'var(--ui)',color:'#FFF',flexShrink:0,border:'2px solid rgba(255,255,255,0.15)',cursor:'pointer'}}>{member?.initials||'?'}</div>
 }
 
+function ChapterProgress({ book, showLabel = true, compact = false }) {
+  const total = book.total_chapters || 0
+  if (!total) return null
+  const cur = Math.min(book.current_chapter || 0, total)
+  const pct = Math.round((cur / total) * 100)
+  return (
+    <div style={{ marginTop: compact ? 6 : 10, width: '100%' }}>
+      <div style={{ height: compact ? 4 : 6, background: 'var(--bd)', borderRadius: 100, overflow: 'hidden' }}>
+        <div style={{ width: pct + '%', height: '100%', background: progressColor(pct), borderRadius: 100, transition: 'width 0.3s' }} />
+      </div>
+      {showLabel && <div style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 600, color: 'var(--txD)', marginTop: 5 }}>Chapter {cur} of {total}</div>}
+    </div>
+  )
+}
+
 function StreakStats({ member }) {
   const stats = [
     { icon: '\u270D\uFE0F', n: member.write_streak || 0, label: 'day writing streak', longest: member.longest_write_streak || 0, color: 'var(--tc)' },
@@ -556,15 +571,15 @@ export default function ClubPage() {
             {filteredPosts.map(p => { const m = p.member || {}; const th = parseThemes(p.themes); return <div key={p.id} className="feed-card"><div className="feed-header"><MemberAvatar member={m} size={32} /><div><span className="feed-name" onClick={() => openProfile(m)}>{m.first_name}</span><span className="feed-time">{timeAgo(p.created_at)}</span></div><span style={{ marginLeft: 'auto' }}><Tag tag={p.tag} /></span></div><div className="feed-body">{p.content}</div>{p.sitting_with && <div className="sitting-with"><div className="sitting-label">Sitting with</div><div className="sitting-text">"{p.sitting_with}"</div></div>}{th.length > 0 && <div className="theme-pills">{th.map(t => <ThemePill key={t} t={t} active={filterTheme === t} onClick={() => setFilterTheme(filterTheme === t ? null : t)} />)}</div>}<div className="feed-actions"><button className={`feed-action ${isLiked(p.id) ? 'liked' : ''}`} onClick={() => toggleLike(p.id)}>{isLiked(p.id) ? '\u2665' : '\u2661'} {likeCount(p.id)}</button></div></div> })}
           </div>
           <div className="sidebar">
-            {curBook && <div className="sidebar-section"><div className="sidebar-label">Currently Reading</div><div className="book-card" style={{ cursor: 'pointer' }} onClick={() => setView('disc')}><div className="book-card-inner" style={{ padding: 24 }}><div className="book-title" style={{ fontSize: 20 }}>{curBook.title}</div><div className="book-author" style={{ marginBottom: 12 }}>{curBook.author}</div></div></div></div>}
-            <div className="sidebar-section"><div className="sidebar-label">Books ({books.length})</div>{books.map(b => <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 10, marginBottom: 6, cursor: 'pointer' }} onClick={() => { setSelBook(b.id); setView('disc') }}><span className="tag" style={{ background: b.status === 'current' ? 'var(--tcD)' : 'rgba(94,122,98,0.1)', color: b.status === 'current' ? 'var(--tc)' : 'var(--sg)' }}>{b.status === 'current' ? 'now' : 'done'}</span><span style={{ fontFamily: 'var(--hd)', fontSize: 13, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)', flex: 1 }}>{b.title}</span></div>)}<button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer', width: '100%', marginTop: 8 }} onClick={() => setShowAddBook(true)}>+ Add book</button></div>
+            {curBook && <div className="sidebar-section"><div className="sidebar-label">Currently Reading</div><div className="book-card" style={{ cursor: 'pointer' }} onClick={() => setView('disc')}><div className="book-card-inner" style={{ padding: 24 }}><div className="book-title" style={{ fontSize: 20 }}>{curBook.title}</div><div className="book-author" style={{ marginBottom: 12 }}>{curBook.author}</div><ChapterProgress book={curBook} /></div></div></div>}
+            <div className="sidebar-section"><div className="sidebar-label">Books ({books.length})</div>{books.map(b => <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 10, marginBottom: 6, cursor: 'pointer' }} onClick={() => { setSelBook(b.id); setView('disc') }}><span className="tag" style={{ background: b.status === 'current' ? 'var(--tcD)' : 'rgba(94,122,98,0.1)', color: b.status === 'current' ? 'var(--tc)' : 'var(--sg)' }}>{b.status === 'current' ? 'now' : 'done'}</span><div style={{ flex: 1 }}><span style={{ fontFamily: 'var(--hd)', fontSize: 13, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</span><ChapterProgress book={b} showLabel={false} compact /></div></div>)}<button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer', width: '100%', marginTop: 8 }} onClick={() => setShowAddBook(true)}>+ Add book</button></div>
           </div>
         </div>}
 
         {/* BOOKSHELF / DISCUSSIONS */}
         {view === 'disc' && <div style={{ paddingBottom: 80 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><div className="section-title">Bookshelf</div><button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer' }} onClick={() => setShowAddBook(true)}>+ Add book</button></div>
-          <div className="shelf">{books.map(b => <div key={b.id} className={`shelf-item ${selBook === b.id ? 'active' : ''}`} onClick={() => { setSelBook(b.id); setDiscMode('chapters') }}><div className={`shelf-title ${selBook === b.id ? 'inv' : ''}`}>{b.title}</div><div className={`shelf-author ${selBook === b.id ? 'inv' : ''}`}>{b.author}</div><span className="tag" style={{ background: b.status === 'current' ? (selBook === b.id ? 'rgba(194,122,90,0.25)' : 'var(--tcD)') : (selBook === b.id ? 'rgba(94,122,98,0.25)' : 'rgba(94,122,98,0.1)'), color: b.status === 'current' ? 'var(--tc)' : 'var(--sg)', width: 'fit-content', marginTop: 4 }}>{b.status === 'current' ? 'Reading Now' : 'Completed'}</span></div>)}</div>
+          <div className="shelf">{books.map(b => <div key={b.id} className={`shelf-item ${selBook === b.id ? 'active' : ''}`} onClick={() => { setSelBook(b.id); setDiscMode('chapters') }}><div className={`shelf-title ${selBook === b.id ? 'inv' : ''}`}>{b.title}</div><div className={`shelf-author ${selBook === b.id ? 'inv' : ''}`}>{b.author}</div><span className="tag" style={{ background: b.status === 'current' ? (selBook === b.id ? 'rgba(194,122,90,0.25)' : 'var(--tcD)') : (selBook === b.id ? 'rgba(94,122,98,0.25)' : 'rgba(94,122,98,0.1)'), color: b.status === 'current' ? 'var(--tc)' : 'var(--sg)', width: 'fit-content', marginTop: 4 }}>{b.status === 'current' ? 'Reading Now' : 'Completed'}</span><ChapterProgress book={b} /></div>)}</div>
 
           {activeBook && <>
             <div className="disc-header"><div className="disc-title">{activeBook.title}</div></div>
