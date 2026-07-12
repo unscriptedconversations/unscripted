@@ -153,6 +153,7 @@ export default function ClubPage() {
   const [profileReplyCount, setProfileReplyCount] = useState(0)
   const [showHow, setShowHow] = useState(false)
   const [actionSheet, setActionSheet] = useState(null)
+  const [memberProgress, setMemberProgress] = useState({})
   const [showEditProfile, setShowEditProfile] = useState(false)
   const [showFigPicker, setShowFigPicker] = useState(false)
   const [editForm, setEditForm] = useState({ fav_book: '', fav_book_author: '', one_word: '', fav_cartoon: '', avatar_figure: null })
@@ -190,6 +191,22 @@ export default function ClubPage() {
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id, id])
+
+  // Opening a club marks its feed read (powers the homepage unread badge).
+  useEffect(() => {
+    if (!currentUser || !id) return
+    supabase.from('club_members').update({ last_visited_at: new Date().toISOString() }).eq('club_id', id).eq('member_id', currentUser.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, id])
+
+  // Load this reader's own per-book chapter progress
+  useEffect(() => {
+    if (!currentUser) return
+    supabase.from('member_progress').select('book_id, current_chapter').eq('member_id', currentUser.id).then(({ data }) => {
+      if (data) { const m = {}; data.forEach(r => { m[r.book_id] = r.current_chapter }); setMemberProgress(m) }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id])
 
   async function loadClub() {
     const { data: c } = await supabase.from('clubs').select('*').eq('id', id).single()
@@ -318,6 +335,17 @@ export default function ClubPage() {
     if (next === (b.current_chapter || 0)) return
     await supabase.from('books').update({ current_chapter: next }).eq('id', bookId)
     setBooks(prev => prev.map(x => x.id === bookId ? { ...x, current_chapter: next } : x))
+  }
+
+  async function setMyChapter(bookId, ch) {
+    if (!currentUser) return
+    const b = books.find(x => x.id === bookId)
+    if (!b) return
+    const total = b.total_chapters || 0
+    const next = Math.max(0, Math.min(ch, total))
+    if (next === (memberProgress[bookId] || 0)) return
+    setMemberProgress(prev => ({ ...prev, [bookId]: next }))
+    await supabase.from('member_progress').upsert({ member_id: currentUser.id, book_id: bookId, current_chapter: next, updated_at: new Date().toISOString() }, { onConflict: 'member_id,book_id' })
   }
 
   async function saveClubSettings() {
@@ -607,6 +635,18 @@ export default function ClubPage() {
                 </div>}
               </div>
               <ChapterProgress book={activeBook} showLabel={!isHost} />
+            </div>}
+
+            {currentUser && isMember && activeBook.total_chapters > 0 && <div style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '16px 20px', margin: '0 0 24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Your progress</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button style={stepBtn} aria-label="Back a chapter" onClick={() => setMyChapter(activeBook.id, (memberProgress[activeBook.id] || 0) - 1)}>−</button>
+                  <span style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--ink)', minWidth: 74, textAlign: 'center' }}>Ch {Math.min(memberProgress[activeBook.id] || 0, activeBook.total_chapters)} / {activeBook.total_chapters}</span>
+                  <button style={stepBtn} aria-label="Forward a chapter" onClick={() => setMyChapter(activeBook.id, (memberProgress[activeBook.id] || 0) + 1)}>+</button>
+                </div>
+              </div>
+              <ChapterProgress book={{ current_chapter: memberProgress[activeBook.id] || 0, total_chapters: activeBook.total_chapters }} showLabel={false} />
             </div>}
 
             {activeBook.status === 'completed' && activeOpenThread && <div className="mode-toggle"><button className={`mode-btn ${discMode === 'chapters' ? 'act' : ''}`} onClick={() => setDiscMode('chapters')}>By Chapter</button><button className={`mode-btn ${discMode === 'open' ? 'act' : ''}`} onClick={() => setDiscMode('open')}>Open Discussion</button></div>}
