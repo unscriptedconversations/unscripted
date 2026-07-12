@@ -11,6 +11,8 @@ export default function Landing() {
   const [sr, setSR] = useState(null)
   const [srTab, setSrTab] = useState('all')
   const [activeMap, setActiveMap] = useState({})
+  const [recentPosts, setRecentPosts] = useState([])
+  const [myMemberships, setMyMemberships] = useState(null)
   const [currentUser, setCurrentUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -38,16 +40,27 @@ export default function Landing() {
     return () => subscription.unsubscribe()
   }, [])
 
+  // Load which clubs the current user belongs to + when they last visited each
+  useEffect(() => {
+    if (!currentUser) { setMyMemberships(null); return }
+    supabase.from('club_members').select('club_id, last_visited_at').eq('member_id', currentUser.id).then(({ data }) => {
+      const m = {}
+      for (const r of data || []) m[r.club_id] = r.last_visited_at
+      setMyMemberships(m)
+    })
+  }, [currentUser?.id])
+
   async function loadData() {
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
     const [cR, bR, pR] = await Promise.all([
       supabase.from('clubs').select('*, club_members(count), books(title, author, status)'),
       supabase.from('books').select('*, club:clubs(name)').order('created_at', { ascending: false }),
-      supabase.from('posts').select('club_id, member_id').gte('created_at', since),
+      supabase.from('posts').select('club_id, member_id, created_at').gte('created_at', since),
     ])
     if (cR.data) setClubs(cR.data)
     if (bR.data) setBooks(bR.data)
     if (pR.data) {
+      setRecentPosts(pR.data)
       const seen = {}
       for (const p of pR.data) {
         if (!p.club_id) continue
@@ -87,6 +100,24 @@ export default function Landing() {
     const n = activeMap[c.id] || 0
     if (!n) return null
     return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, color: 'var(--sg)' }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--sg)' }} />{n} active this week</span>
+  }
+
+  // Unread = posts in the last 7 days newer than my last visit, not my own.
+  // (7-day window; if you haven't visited in longer, it undercounts — fine for a nudge.)
+  function unreadCount(c) {
+    if (!myMemberships || !(c.id in myMemberships)) return 0
+    const lv = myMemberships[c.id] ? new Date(myMemberships[c.id]).getTime() : 0
+    let n = 0
+    for (const p of recentPosts) {
+      if (p.club_id === c.id && p.member_id !== currentUser?.id && new Date(p.created_at).getTime() > lv) n++
+    }
+    return n
+  }
+
+  function unreadBadge(c) {
+    const n = unreadCount(c)
+    if (!n) return null
+    return <span style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, color: '#FFF', background: 'var(--tc)', borderRadius: 100, padding: '2px 9px', flexShrink: 0 }}>{n} new</span>
   }
 
   const featuredClubs = clubs.filter(c => c.featured)
@@ -164,6 +195,7 @@ export default function Landing() {
                       <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{getClubMemberCount(c)} members</div>
                       {activeBadge(c)}
                     </div>
+                    {unreadBadge(c)}
                     <span className="tag" style={{ background: c.privacy === 'open' ? 'rgba(94,122,98,0.1)' : 'var(--tcD)', color: c.privacy === 'open' ? 'var(--sg)' : 'var(--tc)' }}>{c.privacy}</span>
                   </div>
                 ))}
@@ -306,6 +338,7 @@ export default function Landing() {
                     <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{cb ? cb.title + ' · ' : ''}{getClubMemberCount(c)} members</div>
                     {activeBadge(c)}
                   </div>
+                  {unreadBadge(c)}
                   <span className="tag" style={{ background: c.privacy === 'open' ? 'rgba(94,122,98,0.1)' : 'var(--tcD)', color: c.privacy === 'open' ? 'var(--sg)' : 'var(--tc)' }}>{c.privacy}</span>
                 </div>
               )
