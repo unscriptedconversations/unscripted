@@ -48,7 +48,11 @@ export default function ProfilePage() {
   const [showColorPicker, setShowColorPicker] = useState(false)
 
   useEffect(() => {
-    try { const sv = window.localStorage?.getItem?.('unscripted_user'); if (sv) setCurrentUser(JSON.parse(sv)) } catch (e) {}
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) return
+      const { data: m } = await supabase.from('members').select('*').eq('id', session.user.id).single()
+      if (m) setCurrentUser(m)
+    })
   }, [])
 
   useEffect(() => { if (id) load() }, [id])
