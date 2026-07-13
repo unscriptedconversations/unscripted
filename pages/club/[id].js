@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
-import { FIGURES, getFigure } from '../../lib/figures'
 import Logo from '../../components/Logo'
 import Tag from '../../components/Tag'
 
@@ -62,10 +61,22 @@ function SheetRow({ icon, label, danger, onClick }) {
   </button>
 }
 
+function initialsFor(member) {
+  if (member?.initials) return member.initials
+  const f = (member?.first_name || '')[0] || ''
+  const l = (member?.last_name || '')[0] || ''
+  return (f + l).toUpperCase() || '?'
+}
+const AVATAR_COLORS = ['#C27A5A', '#5E7A62', '#A0603E', '#7A9A7E', '#B0855A', '#6E8B6E', '#B0A594']
+function colorFor(member) {
+  if (member?.color) return member.color
+  const seed = String(member?.id || member?.email || member?.first_name || '')
+  let h = 0
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0
+  return AVATAR_COLORS[h % AVATAR_COLORS.length]
+}
 function MemberAvatar({ member, size = 36 }) {
-  const fig = member?.avatar_figure ? getFigure(member.avatar_figure) : null
-  if (fig) return <div style={{width:size,height:size,borderRadius:'50%',background:fig.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:size*0.5,flexShrink:0,border:'2px solid rgba(255,255,255,0.15)',cursor:'pointer'}}>{fig.icon}</div>
-  return <div style={{width:size,height:size,borderRadius:'50%',background:member?.color||'#8B6E52',display:'flex',alignItems:'center',justifyContent:'center',fontSize:size*0.31,fontWeight:700,fontFamily:'var(--ui)',color:'#FFF',flexShrink:0,border:'2px solid rgba(255,255,255,0.15)',cursor:'pointer'}}>{member?.initials||'?'}</div>
+  return <div style={{ width: size, height: size, borderRadius: '50%', background: colorFor(member), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.36, fontWeight: 700, fontFamily: 'var(--ui)', color: '#FFF', flexShrink: 0, border: '2px solid rgba(255,255,255,0.15)' }}>{initialsFor(member)}</div>
 }
 
 function ChapterProgress({ book, showLabel = true, compact = false }) {
@@ -155,8 +166,7 @@ export default function ClubPage() {
   const [actionSheet, setActionSheet] = useState(null)
   const [memberProgress, setMemberProgress] = useState({})
   const [showEditProfile, setShowEditProfile] = useState(false)
-  const [showFigPicker, setShowFigPicker] = useState(false)
-  const [editForm, setEditForm] = useState({ fav_book: '', fav_book_author: '', one_word: '', fav_cartoon: '', avatar_figure: null })
+  const [editForm, setEditForm] = useState({ fav_book: '', fav_book_author: '', one_word: '', fav_cartoon: '' })
 
   useEffect(() => {
     // Load session from Supabase Auth (replaces localStorage)
@@ -365,7 +375,7 @@ export default function ClubPage() {
     if (!currentUser) return
     await supabase.from('club_members').delete()
       .eq('club_id', id).eq('member_id', currentUser.id)
-    await supabase.auth.signOut()
+    try { await supabase.auth.signOut({ scope: 'local' }) } catch (e) {}
     router.push('/')
   }
 
@@ -394,7 +404,6 @@ export default function ClubPage() {
       fav_book_author: currentUser.fav_book_author || '',
       one_word: currentUser.one_word || '',
       fav_cartoon: currentUser.fav_cartoon || '',
-      avatar_figure: currentUser.avatar_figure || null,
     })
     setShowFigPicker(false)
     setShowEditProfile(true)
@@ -407,7 +416,6 @@ export default function ClubPage() {
       fav_book_author: editForm.fav_book_author.trim() || null,
       one_word: editForm.one_word.trim() || null,
       fav_cartoon: editForm.fav_cartoon.trim() || null,
-      avatar_figure: editForm.avatar_figure || null,
     }
     const { error } = await supabase.from('members').update(upd).eq('id', currentUser.id)
     if (error) return
@@ -496,21 +504,9 @@ export default function ClubPage() {
           <h2 className="modal-title" style={{ fontSize: 28 }}>Edit your profile</h2>
           <p className="modal-sub">This is how every club sees you.</p>
 
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-            <div onClick={() => setShowFigPicker(v => !v)} style={{ cursor: 'pointer' }}>
-              <MemberAvatar member={{ avatar_figure: editForm.avatar_figure, color: currentUser?.color, initials: currentUser?.initials }} size={88} />
-            </div>
-            <button onClick={() => setShowFigPicker(v => !v)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--tc)', background: 'none', border: 'none', cursor: 'pointer' }}>{showFigPicker ? 'Close picker' : 'Change avatar'}</button>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
+            <MemberAvatar member={currentUser} size={88} />
           </div>
-
-          {showFigPicker && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(64px, 1fr))', gap: 12, maxHeight: 220, overflowY: 'auto', marginBottom: 24, padding: 4 }}>
-            {FIGURES.map(f => (
-              <div key={f.id} onClick={() => setEditForm(d => ({ ...d, avatar_figure: f.id }))} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                <div style={{ width: 48, height: 48, borderRadius: '50%', background: f.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, border: editForm.avatar_figure === f.id ? '3px solid var(--tc)' : '2px solid rgba(255,255,255,0.15)', boxShadow: editForm.avatar_figure === f.id ? '0 0 0 2px var(--tcD)' : 'none' }}>{f.icon}</div>
-                <span style={{ fontFamily: 'var(--ui)', fontSize: 9, color: 'var(--txD)', textAlign: 'center', lineHeight: 1.1 }}>{f.name}</span>
-              </div>
-            ))}
-          </div>}
 
           <label className="field-label">Favorite book</label>
           <input className="field-input" value={editForm.fav_book} onChange={e => setEditForm(d => ({ ...d, fav_book: e.target.value }))} placeholder="A book that shaped you" />
@@ -561,7 +557,7 @@ export default function ClubPage() {
                   <span className="user-nav-name">{currentUser.first_name}</span>
                 </div>
                 <button
-                  onClick={async () => { await supabase.auth.signOut(); router.push('/') }}
+                  onClick={async () => { try { await supabase.auth.signOut({ scope: 'local' }) } catch (e) {} setCurrentUser(null); router.push('/') }}
                   style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, letterSpacing: 1, color: 'var(--txD)', background: 'none', border: 'none', cursor: 'pointer', textTransform: 'uppercase' }}
                 >
                   Log out
@@ -706,7 +702,7 @@ export default function ClubPage() {
             {members.map(m => <div key={m.id} className="feed-card" style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => openProfile(m)}>
               <MemberAvatar member={m} size={52} />
               <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)', marginTop: 14 }}>{m.first_name} {m.last_name}</div>
-              {m.avatar_figure && <div style={{ fontFamily: 'var(--hd)', fontSize: 12, fontStyle: 'italic', color: 'var(--txD)', marginTop: 4 }}>{getFigure(m.avatar_figure).name}</div>}
+              
             </div>)}
           </div>
         </div>}
@@ -827,7 +823,7 @@ export default function ClubPage() {
             <button className="profile-back" onClick={() => setView('feed')}>← Back</button>
             {profileMember.id === currentUser?.id && <button onClick={openEditProfile} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--tc)', background: 'var(--tcD)', border: '1.5px solid var(--tc)', borderRadius: 8, padding: '8px 16px', cursor: 'pointer' }}>Edit profile</button>}
           </div>
-          <div className="profile-header"><MemberAvatar member={profileMember} size={88} /><div><div className="profile-name">{profileMember.first_name} {profileMember.last_name}</div><div className="profile-role">{profileMember.role || 'Member'}</div>{profileMember.avatar_figure && <div className="profile-figure">{getFigure(profileMember.avatar_figure).name}</div>}<div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', marginTop: 8 }}>{profilePostCount} {profilePostCount === 1 ? 'post' : 'posts'} \u00B7 {profileReplyCount} {profileReplyCount === 1 ? 'reply' : 'replies'}</div></div></div>
+          <div className="profile-header"><MemberAvatar member={profileMember} size={88} /><div><div className="profile-name">{profileMember.first_name} {profileMember.last_name}</div><div className="profile-role">{profileMember.role || 'Member'}</div><div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', marginTop: 8 }}>{profilePostCount} {profilePostCount === 1 ? 'post' : 'posts'} \u00B7 {profileReplyCount} {profileReplyCount === 1 ? 'reply' : 'replies'}</div></div></div>
           <StreakStats member={profileMember} />
           {(profileMember.fav_book || profileMember.one_word || profileMember.fav_cartoon) ? <div className="bio-grid">
             <div className="bio-card"><div className="bio-accent" style={{ background: 'var(--tc)' }} /><div className="bio-label">Favorite Book</div>{profileMember.fav_book ? <><div className="bio-book-title">{profileMember.fav_book}</div><div className="bio-book-author">{profileMember.fav_book_author}</div></> : <div className="bio-empty">Not shared yet</div>}</div>
