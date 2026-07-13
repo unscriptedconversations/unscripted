@@ -139,11 +139,7 @@ export default function Landing() {
             <button className="nav-btn active">Explore</button>
             {currentUser ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <div className="user-nav" onClick={async () => {
-                  const { data: ms } = await supabase.from('club_members').select('club_id')
-                    .eq('member_id', currentUser.id).order('joined_at', { ascending: true }).limit(1).single()
-                  router.push(ms?.club_id ? `/club/${ms.club_id}` : '/')
-                }}>
+                <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
                   <span className="user-nav-name">{currentUser.first_name}</span>
                 </div>
                 <span style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--txD)', cursor: 'pointer' }} onClick={async () => { try { await supabase.auth.signOut({ scope: 'local' }) } catch (e) {} setCurrentUser(null) }}>Log out</span>
