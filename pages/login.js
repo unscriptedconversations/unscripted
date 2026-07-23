@@ -67,7 +67,12 @@ export default function Login() {
         .select('*')
         .eq('id', data.session.user.id)
         .single()
-      if (member) {
+if (member) {
+        // Disabled accounts reactivate on login
+        if (member.status === 'disabled') {
+          await supabase.from('members').update({ status: 'active', disabled_at: null }).eq('id', member.id)
+        }
+
         // Find first club membership
         const { data: membership } = await supabase
           .from('club_members')
