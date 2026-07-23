@@ -83,6 +83,10 @@ export default function BookPage() {
     } catch { /* no cover — placeholder shown */ }
   }
 
+  function startClub() {
+    router.push(`/signup?bookTitle=${encodeURIComponent(book.title)}&bookAuthor=${encodeURIComponent(book.author || '')}`)
+  }
+
   if (notFound) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}><div style={{ textAlign: 'center' }}><div style={{ fontFamily: 'var(--hd)', fontSize: 22, fontStyle: 'italic', color: 'var(--ink)', marginBottom: 12 }}>We couldn't find that book.</div><button className="join-btn" onClick={() => router.push('/')}>Back to Explore</button></div></div>
   if (!book) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontFamily: 'var(--ui)', color: 'var(--txD)' }}>Loading...</div></div>
 
@@ -137,7 +141,7 @@ export default function BookPage() {
           {/* ── CTAs ─────────────────────────────────────────────── */}
           <div style={{ display: 'flex', gap: 12, maxWidth: 420, margin: '0 auto 40px' }}>
             {hasClubs && <button style={primaryBtn} onClick={() => document.getElementById('clubs-reading')?.scrollIntoView({ behavior: 'smooth' })}>Join a club reading this</button>}
-            <button style={hasClubs ? secondaryBtn : primaryBtn} onClick={() => router.push('/signup')}>Start a club for this book</button>
+            <button style={hasClubs ? secondaryBtn : primaryBtn} onClick={() => startClub()}>Start a club for this book</button>
           </div>
 
           {/* ── BRIDGE (preserved) ───────────────────────────────── */}
@@ -168,7 +172,7 @@ export default function BookPage() {
             {clubs.length === 0 && <div style={{ background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 14, padding: '32px 24px', textAlign: 'center' }}>
               <div style={{ fontFamily: 'var(--hd)', fontSize: 18, fontStyle: 'italic', color: 'var(--txD)', marginBottom: 8 }}>No clubs are reading this yet</div>
               <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.6, marginBottom: 16, maxWidth: 380, margin: '0 auto 16px' }}>Be the first to open this book up for conversation.</div>
-              <button style={{ ...primaryBtn, flex: 'none' }} onClick={() => router.push('/signup')}>Start a club for this book</button>
+              <button style={{ ...primaryBtn, flex: 'none' }} onClick={() => startClub()}>Start a club for this book</button>
             </div>}
           </div>
         </div>
