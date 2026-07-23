@@ -46,6 +46,10 @@ export default function ProfilePage() {
   const [followerCount, setFollowerCount] = useState(0)
   const [tab, setTab] = useState('writing')
   const [showColorPicker, setShowColorPicker] = useState(false)
+  const [accountModal, setAccountModal] = useState(null)   // 'disable' | 'delete'
+  const [churnReasons, setChurnReasons] = useState([])
+  const [churnNotes, setChurnNotes] = useState('')
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -86,6 +90,42 @@ export default function ProfilePage() {
     setFollowing(!following)
   }
 
+  const CHURN_REASONS = [
+    'Not enough time to read',
+    'Couldn\u2019t find the right club',
+    'Too many notifications',
+    'Not what I expected',
+    'Taking a break',
+    'Something else',
+  ]
+
+  function toggleReason(r) {
+    setChurnReasons(p => p.includes(r) ? p.filter(x => x !== r) : [...p, r])
+  }
+
+  // Reversible: hide the account, keep the data. Logging back in restores it.
+  async function disableAccount() {
+    setBusy(true)
+    await supabase.from('members').update({ status: 'disabled', disabled_at: new Date().toISOString() }).eq('id', member.id)
+    try { await supabase.auth.signOut({ scope: 'local' }) } catch (e) {}
+    router.push('/')
+  }
+
+  // Permanent: record why (optional), then remove the profile row.
+  async function deleteAccount() {
+    setBusy(true)
+    if (churnReasons.length || churnNotes.trim()) {
+      await supabase.from('churn_feedback').insert({
+        member_id: member.id,
+        reasons: churnReasons,
+        notes: churnNotes.trim() || null,
+      })
+    }
+    await supabase.from('members').delete().eq('id', member.id)
+    try { await supabase.auth.signOut({ scope: 'local' }) } catch (e) {}
+    router.push('/')
+  }
+
   if (!member) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontFamily: 'var(--ui)', color: 'var(--txD)' }}>Loading...</div></div>
 
   const isOwner = currentUser && currentUser.id === member.id
@@ -124,7 +164,7 @@ export default function ProfilePage() {
         <div style={{ marginBottom: 32 }} />
 
         <div style={{ display: 'flex', borderBottom: '1px solid var(--bd)', marginBottom: 24 }}>
-          {[['writing', 'Writing'], ['clubs', 'Clubs']].map(([k, l]) => (
+          {[['writing', 'Writing'], ['clubs', 'Clubs'], ...(isOwner ? [['account', 'Account']] : [])].map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: tab === k ? 'var(--ink)' : 'var(--txD)', background: 'none', border: 'none', cursor: 'pointer', padding: '12px 20px 12px 0', position: 'relative' }}>
               {l}{tab === k && <div style={{ position: 'absolute', bottom: -1, left: 0, right: 20, height: 2, background: 'var(--tc)', borderRadius: 2 }} />}
             </button>
@@ -138,6 +178,54 @@ export default function ProfilePage() {
             <div style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 16 }}>Your drafts</div>
             {drafts.map(w => <WritingCard key={w.id} w={w} onClick={() => router.push(`/write?id=${w.id}`)} />)}
           </div>}
+        </div>}
+
+        {isOwner && tab === 'account' && <div>
+          <div style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '20px 22px', marginBottom: 12 }}>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, color: 'var(--ink)', marginBottom: 4 }}>Email</div>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>{member.email}</div>
+          </div>
+
+          <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: '#A0603E', margin: '28px 0 14px', paddingBottom: 10, borderBottom: '1px solid rgba(160,96,62,0.2)' }}>Danger Zone</div>
+
+          <div style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '20px 22px', marginBottom: 12 }}>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)', marginBottom: 6 }}>Take a break</div>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', lineHeight: 1.6, marginBottom: 14 }}>Hide your profile and writing. Nothing is deleted \u2014 log back in any time to pick up where you left off.</div>
+            <button onClick={() => setAccountModal('disable')} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '10px 18px', cursor: 'pointer' }}>Disable account</button>
+          </div>
+
+          <div style={{ background: 'var(--sf)', border: '1px solid rgba(160,96,62,0.25)', borderRadius: 14, padding: '20px 22px' }}>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: '#A0603E', marginBottom: 6 }}>Delete account</div>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', lineHeight: 1.6, marginBottom: 14 }}>Permanently removes your profile, writing, and posts. This can\u2019t be undone.</div>
+            <button onClick={() => setAccountModal('delete')} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: '#A0603E', border: 'none', borderRadius: 8, padding: '10px 18px', cursor: 'pointer' }}>Delete my account</button>
+          </div>
+        </div>}
+
+        {accountModal && <div onClick={() => !busy && setAccountModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(26,31,46,0.5)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--sf)', borderRadius: 18, padding: '28px 26px', maxWidth: 460, width: '100%', maxHeight: '86vh', overflowY: 'auto' }}>
+            {accountModal === 'disable' ? (<>
+              <div style={{ fontFamily: 'var(--hd)', fontSize: 24, fontWeight: 600, color: 'var(--ink)', marginBottom: 10 }}>Take a break?</div>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', lineHeight: 1.6, marginBottom: 24 }}>Your profile and writing will be hidden. Your clubs, posts, and streaks stay exactly as they are \u2014 just log back in whenever you\u2019re ready.</div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button disabled={busy} onClick={disableAccount} style={{ flex: 1, fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 10, padding: '13px', cursor: 'pointer', opacity: busy ? 0.5 : 1 }}>{busy ? 'Working\u2026' : 'Disable account'}</button>
+                <button disabled={busy} onClick={() => setAccountModal(null)} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 10, padding: '13px 22px', cursor: 'pointer' }}>Cancel</button>
+              </div>
+            </>) : (<>
+              <div style={{ fontFamily: 'var(--hd)', fontSize: 24, fontWeight: 600, color: 'var(--ink)', marginBottom: 10 }}>Before you go</div>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', lineHeight: 1.6, marginBottom: 20 }}>This permanently deletes your account. If you\u2019d rather step away for a while, disabling keeps everything intact.</div>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 10 }}>What led to this? (optional)</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+                {CHURN_REASONS.map(r => (
+                  <button key={r} onClick={() => toggleReason(r)} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: churnReasons.includes(r) ? 'var(--tc)' : 'var(--txD)', background: churnReasons.includes(r) ? 'var(--tcD)' : 'none', border: '1px solid ' + (churnReasons.includes(r) ? 'var(--tc)' : 'var(--bd2)'), borderRadius: 100, padding: '8px 14px', cursor: 'pointer' }}>{r}</button>
+                ))}
+              </div>
+              <textarea value={churnNotes} onChange={e => setChurnNotes(e.target.value)} placeholder="Anything else you\u2019d want us to know?" rows={3} style={{ width: '100%', padding: '12px 14px', background: 'var(--bg)', border: '1px solid var(--bd2)', borderRadius: 10, fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--ink)', outline: 'none', resize: 'vertical', boxSizing: 'border-box', marginBottom: 22 }} />
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button disabled={busy} onClick={deleteAccount} style={{ flex: 1, fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: '#A0603E', border: 'none', borderRadius: 10, padding: '13px', cursor: 'pointer', opacity: busy ? 0.5 : 1 }}>{busy ? 'Deleting\u2026' : 'Delete forever'}</button>
+                <button disabled={busy} onClick={() => { setAccountModal('disable'); }} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 10, padding: '13px 18px', cursor: 'pointer' }}>Disable instead</button>
+              </div>
+            </>)}
+          </div>
         </div>}
 
         {tab === 'clubs' && <div>
