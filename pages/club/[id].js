@@ -375,7 +375,6 @@ export default function ClubPage() {
     if (!currentUser) return
     await supabase.from('club_members').delete()
       .eq('club_id', id).eq('member_id', currentUser.id)
-    try { await supabase.auth.signOut({ scope: 'local' }) } catch (e) {}
     router.push('/')
   }
 
