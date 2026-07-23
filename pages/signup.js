@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
-import { FIGURES, getFigure } from '../lib/figures'
 import Logo from '../components/Logo'
 
 // ── Interest prompt data ────────────────────────────────────────────────────
@@ -39,8 +38,6 @@ export default function Signup() {
   // ── Core flow state ────────────────────────────────────────────────────────
   const [mode, setMode]         = useState(null)
   const [step, setStep]         = useState(0)
-  const [sf, setSF]             = useState(null)      // selected figure ID
-  const [fc, setFC]             = useState('All')     // figure category filter
   const [joinedClubs, setJC]    = useState({})
   const [clubs, setClubs]       = useState([])
   const [error, setError]       = useState('')
@@ -88,6 +85,17 @@ export default function Signup() {
       setStep(0)
     })
   }, [isOAuth])
+
+  // Arriving from a book page ("Start a club for this book") — carry the book through
+  useEffect(() => {
+    if (!router.isReady || isOAuth) return
+    const { bookTitle, bookAuthor } = router.query
+    if (!bookTitle) return
+    setCD(d => ({ ...d, bookTitle: String(bookTitle), bookAuthor: bookAuthor ? String(bookAuthor) : '' }))
+    setMode('club')
+    setStep(0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.bookTitle])
 
   // ── Styles ─────────────────────────────────────────────────────────────────
   const fl  = { fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2.5, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 10, display: 'block' }
@@ -181,7 +189,10 @@ export default function Signup() {
 
     // Insert member row — using auth user ID as primary key
     const initials = ((regData.first?.[0] || '') + (regData.last?.[0] || '')).toUpperCase()
-    const fig = sf ? getFigure(sf) : FIGURES[0]
+    const palette = ['#C27A5A', '#5E7A62', '#A0603E', '#7A9A7E', '#B0855A', '#6E8B6E', '#B0A594']
+    let ch = 0; const seed = regData.email.trim().toLowerCase()
+    for (let i = 0; i < seed.length; i++) ch = (ch * 31 + seed.charCodeAt(i)) >>> 0
+    const color = palette[ch % palette.length]
 
     const { data: member, error: memberErr } = await supabase
       .from('members')
@@ -191,8 +202,7 @@ export default function Signup() {
         last_name: regData.last.trim(),
         email: regData.email.trim().toLowerCase(),
         initials,
-        color: fig.color,
-        avatar_figure: sf || 'baldwin',
+        color,
       })
       .select()
       .single()
@@ -280,8 +290,6 @@ export default function Signup() {
     router.push(membership?.club_id ? `/club/${membership.club_id}` : '/')
   }
 
-  const filteredFigs = fc === 'All' ? FIGURES : FIGURES.filter(f => f.cat === fc)
-  const chosenFig    = sf ? FIGURES.find(f => f.id === sf) : null
 
   // ── Interest prompt — Goals step ─────────────────────────────────────────
   if (done && interestStep === 1) {
@@ -421,14 +429,14 @@ export default function Signup() {
         <title>Welcome to unscripted</title>
         <div style={{ textAlign: 'center', maxWidth: 480, padding: '0 28px' }}>
           <div style={{ marginBottom: 32 }}><Logo /></div>
-          {chosenFig && (
+          {createdUser && (
             <div style={{
-              width: 80, height: 80, borderRadius: '50%', background: chosenFig.color,
+              width: 80, height: 80, borderRadius: '50%', background: createdUser.color || '#C27A5A',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 40, margin: '0 auto 24px',
-              border: '3px solid rgba(255,255,255,0.15)',
+              fontSize: 30, fontWeight: 700, fontFamily: 'var(--ui)', color: '#FFF',
+              margin: '0 auto 24px', border: '3px solid rgba(255,255,255,0.15)',
             }}>
-              {chosenFig.icon}
+              {createdUser.initials || ((regData.first?.[0] || '') + (regData.last?.[0] || '')).toUpperCase()}
             </div>
           )}
           <div style={{ fontFamily: 'var(--hd)', fontSize: 40, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>
@@ -501,7 +509,7 @@ export default function Signup() {
               >
                 <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--tc)', marginBottom: 12 }}>Reader</div>
                 <div style={{ fontFamily: 'var(--hd)', fontSize: 24, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>Join as an individual</div>
-                <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', lineHeight: 1.6 }}>Create your profile, choose your avatar, and browse book clubs to join.</div>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', lineHeight: 1.6 }}>Create your profile and browse book clubs to join.</div>
               </div>
 
               <div
@@ -530,10 +538,10 @@ export default function Signup() {
         {mode === 'individual' && !done && (
           <div style={{ paddingBottom: 80 }}>
             <div style={{ display: 'flex', gap: 8, marginBottom: 40 }}>
-              {['About you', 'Your voice', 'Find clubs'].map((l, i) => (
+              {['About you', 'Find clubs'].map((l, i) => (
                 <div key={i} style={{ flex: 1, textAlign: 'center' }}>
-                  <div style={{ height: 3, borderRadius: 2, background: i <= step ? 'var(--tc)' : 'var(--bd)', marginBottom: 8 }} />
-                  <span style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 600, letterSpacing: 1.5, textTransform: 'uppercase', color: i <= step ? 'var(--tc)' : 'var(--txD)' }}>{l}</span>
+                  <div style={{ height: 3, borderRadius: 2, background: i <= (step > 1 ? step - 1 : step) ? 'var(--tc)' : 'var(--bd)', marginBottom: 8 }} />
+                  <span style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 600, letterSpacing: 1.5, textTransform: 'uppercase', color: i <= (step > 1 ? step - 1 : step) ? 'var(--tc)' : 'var(--txD)' }}>{l}</span>
                 </div>
               ))}
             </div>
@@ -570,56 +578,14 @@ export default function Signup() {
                   </div>
                 </>}
 
-                <button style={btn} onClick={() => {
+                <button style={{ ...btn, opacity: loading ? 0.5 : 1 }} disabled={loading} onClick={async () => {
                   setError('')
                   if (!regData.first.trim() || !regData.last.trim() || !regData.email.trim()) { setError('All fields are required.'); return }
                   if (!isOAuth && regData.password.length < 8) { setError('Password must be at least 8 characters.'); return }
-                  setStep(1)
-                }}>Continue</button>
-              </div>
-            )}
-
-            {/* Step 1 — Choose your voice */}
-            {step === 1 && (
-              <div>
-                <div style={{ fontFamily: 'var(--hd)', fontSize: 28, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>Choose your voice.</div>
-                <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', marginBottom: 24 }}>Pick a figure who speaks to how you move through the world.</div>
-                {error && <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: '#A0603E', background: 'rgba(160,96,62,0.08)', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>{error}</div>}
-
-                <div style={{ display: 'flex', borderBottom: '1px solid var(--bd)', marginBottom: 20 }}>
-                  {['All', 'Literature', 'Art', 'Culture'].map(c => (
-                    <button key={c} style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 600, letterSpacing: 2, textTransform: 'uppercase', color: fc === c ? 'var(--ink)' : 'var(--txD)', background: 'none', border: 'none', cursor: 'pointer', padding: '10px 16px', position: 'relative' }} onClick={() => setFC(c)}>
-                      {c}
-                      {fc === c && <div style={{ position: 'absolute', bottom: -1, left: 16, right: 16, height: 2, background: 'var(--tc)', borderRadius: 2 }} />}
-                    </button>
-                  ))}
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 24, maxHeight: 320, overflowY: 'auto' }}>
-                  {filteredFigs.map(f => (
-                    <div key={f.id} style={{ background: sf === f.id ? 'rgba(194,122,90,0.04)' : 'var(--bg)', border: sf === f.id ? '2px solid var(--tc)' : '1.5px solid var(--bd)', borderRadius: 12, padding: '16px 12px', textAlign: 'center', cursor: 'pointer', position: 'relative', overflow: 'hidden' }} onClick={() => setSF(f.id)}>
-                      {sf === f.id && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--tc)' }} />}
-                      <div style={{ width: 48, height: 48, borderRadius: '50%', background: f.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, margin: '0 auto 8px' }}>{f.icon}</div>
-                      <div style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, color: 'var(--ink)' }}>{f.name}</div>
-                      <div style={{ fontFamily: 'var(--hd)', fontSize: 11, fontStyle: 'italic', color: 'var(--txD)' }}>{f.sig}</div>
-                    </div>
-                  ))}
-                </div>
-
-                <div style={{ display: 'flex', gap: 12 }}>
-                  <button style={btnO} onClick={() => setStep(0)}>Back</button>
-                  <button
-                    style={{ ...btn, flex: 1, opacity: sf && !loading ? 1 : 0.3 }}
-                    disabled={!sf || loading}
-                    onClick={async () => {
-                      if (!sf) return
-                      const user = await createAccount()
-                      if (user) setStep(2)
-                    }}
-                  >
-                    {loading ? 'Creating account…' : 'Continue'}
-                  </button>
-                </div>
+                  if (createdUser) { setStep(2); return }
+                  const user = await createAccount()
+                  if (user) setStep(2)
+                }}>{loading ? 'Creating account…' : 'Continue'}</button>
               </div>
             )}
 
@@ -651,7 +617,7 @@ export default function Signup() {
                 })}
 
                 <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
-                  <button style={btnO} onClick={() => setStep(1)}>Back</button>
+                  <button style={btnO} onClick={() => setStep(0)}>Back</button>
                   <button style={{ ...btn, flex: 1 }} onClick={() => setDone(true)}>Enter unscripted</button>
                 </div>
                 <div style={{ textAlign: 'center', marginTop: 16 }}>
@@ -666,10 +632,10 @@ export default function Signup() {
         {mode === 'club' && !done && (
           <div style={{ paddingBottom: 80 }}>
             <div style={{ display: 'flex', gap: 8, marginBottom: 40 }}>
-              {['About you', 'Your voice', 'Your club', 'First book', 'Invite'].map((l, i) => (
+              {['About you', 'Your club', 'First book', 'Invite'].map((l, i) => (
                 <div key={i} style={{ flex: 1, textAlign: 'center' }}>
-                  <div style={{ height: 3, borderRadius: 2, background: i <= step ? 'var(--tc)' : 'var(--bd)', marginBottom: 8 }} />
-                  <span style={{ fontFamily: 'var(--ui)', fontSize: 8, fontWeight: 600, letterSpacing: 1.5, textTransform: 'uppercase', color: i <= step ? 'var(--tc)' : 'var(--txD)' }}>{l}</span>
+                  <div style={{ height: 3, borderRadius: 2, background: i <= (step > 1 ? step - 1 : step) ? 'var(--tc)' : 'var(--bd)', marginBottom: 8 }} />
+                  <span style={{ fontFamily: 'var(--ui)', fontSize: 8, fontWeight: 600, letterSpacing: 1.5, textTransform: 'uppercase', color: i <= (step > 1 ? step - 1 : step) ? 'var(--tc)' : 'var(--txD)' }}>{l}</span>
                 </div>
               ))}
             </div>
@@ -701,45 +667,14 @@ export default function Signup() {
                   </button>
                 </div>
 
-                <button style={btn} onClick={() => {
+                <button style={{ ...btn, opacity: loading ? 0.5 : 1 }} disabled={loading} onClick={async () => {
                   setError('')
                   if (!regData.first.trim() || !regData.last.trim() || !regData.email.trim()) { setError('All fields are required.'); return }
                   if (regData.password.length < 8) { setError('Password must be at least 8 characters.'); return }
-                  setStep(1)
-                }}>Continue</button>
-              </div>
-            )}
-
-            {/* Step 1 — Choose your voice */}
-            {step === 1 && (
-              <div>
-                <div style={{ fontFamily: 'var(--hd)', fontSize: 28, fontWeight: 600, color: 'var(--ink)', marginBottom: 24 }}>Choose your voice.</div>
-                {error && <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: '#A0603E', background: 'rgba(160,96,62,0.08)', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>{error}</div>}
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 24, maxHeight: 320, overflowY: 'auto' }}>
-                  {FIGURES.map(f => (
-                    <div key={f.id} style={{ background: sf === f.id ? 'rgba(194,122,90,0.04)' : 'var(--bg)', border: sf === f.id ? '2px solid var(--tc)' : '1.5px solid var(--bd)', borderRadius: 12, padding: '14px 10px', textAlign: 'center', cursor: 'pointer', position: 'relative', overflow: 'hidden' }} onClick={() => setSF(f.id)}>
-                      {sf === f.id && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--tc)' }} />}
-                      <div style={{ width: 44, height: 44, borderRadius: '50%', background: f.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, margin: '0 auto 6px' }}>{f.icon}</div>
-                      <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, color: 'var(--ink)' }}>{f.name}</div>
-                    </div>
-                  ))}
-                </div>
-
-                <div style={{ display: 'flex', gap: 12 }}>
-                  <button style={btnO} onClick={() => setStep(0)}>Back</button>
-                  <button
-                    style={{ ...btn, flex: 1, opacity: sf && !loading ? 1 : 0.3 }}
-                    disabled={!sf || loading}
-                    onClick={async () => {
-                      if (!sf) return
-                      const user = await createAccount()
-                      if (user) setStep(2)
-                    }}
-                  >
-                    {loading ? 'Creating account…' : 'Continue'}
-                  </button>
-                </div>
+                  if (createdUser) { setStep(2); return }
+                  const user = await createAccount()
+                  if (user) setStep(2)
+                }}>{loading ? 'Creating account…' : 'Continue'}</button>
               </div>
             )}
 
@@ -761,7 +696,7 @@ export default function Signup() {
                   ))}
                 </div>
                 <div style={{ display: 'flex', gap: 12 }}>
-                  <button style={btnO} onClick={() => setStep(1)}>Back</button>
+                  <button style={btnO} onClick={() => setStep(0)}>Back</button>
                   <button style={{ ...btn, flex: 1 }} onClick={() => setStep(3)}>Continue</button>
                 </div>
               </div>
@@ -773,6 +708,11 @@ export default function Signup() {
                 <div style={{ fontFamily: 'var(--hd)', fontSize: 28, fontWeight: 600, color: 'var(--ink)', marginBottom: 24 }}>What's the first book?</div>
                 <div style={{ position: 'relative', marginBottom: 24 }}>
                   <label style={fl}>Search for a book</label>
+                  {router.query.bookTitle && clubData.bookTitle === String(router.query.bookTitle) && (
+                    <div style={{ background: 'var(--tcD)', border: '1px solid var(--tc)', borderRadius: 10, padding: '12px 16px', marginBottom: 16, fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--tc)', fontWeight: 600 }}>
+                      Starting a club for “{clubData.bookTitle}” — you can change it below.
+                    </div>
+                  )}
                   <input style={{ ...fi, marginBottom: 0 }} placeholder="Start typing a title..." value={bkQ} onChange={e => searchBook(e.target.value)} />
                   {(bkR.length > 0 || bkL) && (
                     <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 12, boxShadow: '0 12px 32px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 280, overflowY: 'auto', marginTop: 4 }}>
