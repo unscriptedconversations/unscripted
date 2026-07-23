@@ -3,6 +3,8 @@ import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
 
+let olTimer
+
 export default function Landing() {
   const router = useRouter()
   const [clubs, setClubs] = useState([])
@@ -11,6 +13,8 @@ export default function Landing() {
   const [sr, setSR] = useState(null)
   const [srTab, setSrTab] = useState('all')
   const [activeMap, setActiveMap] = useState({})
+  const [olBooks, setOlBooks] = useState([])
+  const [olLoading, setOlLoading] = useState(false)
   const [recentPosts, setRecentPosts] = useState([])
   const [myMemberships, setMyMemberships] = useState(null)
   const [currentUser, setCurrentUser] = useState(null)
@@ -75,7 +79,7 @@ export default function Landing() {
 
   function doSearch(val) {
     setQ(val)
-    if (val.length < 2) { setSR(null); return }
+    if (val.length < 2) { setSR(null); setOlBooks([]); setOlLoading(false); return }
     const lv = val.toLowerCase()
     const clubHits = clubs.filter(c => c.name.toLowerCase().includes(lv))
     const bookHits = books.filter(b =>
@@ -85,6 +89,34 @@ export default function Landing() {
     )
     setSR({ clubs: clubHits, books: bookHits })
     setSrTab('all')
+    searchOpenLibrary(val)
+  }
+
+  // Live catalog search (any published book, not just ones on unscripted).
+  // Debounced so we don't fire a request per keystroke.
+  function searchOpenLibrary(val) {
+    clearTimeout(olTimer)
+    setOlLoading(true)
+    olTimer = setTimeout(async () => {
+      try {
+        const r = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(val)}&limit=12&fields=key,title,author_name,cover_i,first_publish_year`)
+        const d = await r.json()
+        const onSite = new Set(books.map(b => b.title.toLowerCase()))
+        const hits = (d.docs || [])
+          .filter(doc => doc.title && doc.key)
+          .map(doc => ({
+            key: doc.key.replace('/works/', ''),
+            title: doc.title,
+            author: (doc.author_name || []).join(', '),
+            cover: doc.cover_i,
+            year: doc.first_publish_year,
+          }))
+          .filter(b => !onSite.has(b.title.toLowerCase()))
+          .slice(0, 8)
+        setOlBooks(hits)
+      } catch { setOlBooks([]) }
+      setOlLoading(false)
+    }, 350)
   }
 
   function getClubMemberCount(c) {
@@ -171,9 +203,9 @@ export default function Landing() {
             <span style={{ position: 'absolute', left: 20, top: '50%', transform: 'translateY(-50%)', fontSize: 18 }}>🔍</span>
 
             {sr && <div style={{ position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 400, overflowY: 'auto' }}>
-              {(sr.clubs.length > 0 || sr.books.length > 0) && (
+              {(sr.clubs.length > 0 || sr.books.length > 0 || olBooks.length > 0) && (
                 <div style={{ display: 'flex', gap: 6, padding: '12px 16px', borderBottom: '1px solid var(--bd)', position: 'sticky', top: 0, background: 'var(--sf)', zIndex: 1 }}>
-                  {[['all', 'All', sr.clubs.length + sr.books.length], ['clubs', 'Clubs', sr.clubs.length], ['books', 'Books', sr.books.length]].map(([k, label, n]) => (
+                  {[['all', 'All', sr.clubs.length + sr.books.length + olBooks.length], ['clubs', 'Clubs', sr.clubs.length], ['books', 'Books', sr.books.length + olBooks.length]].map(([k, label, n]) => (
                     <button key={k} onClick={() => setSrTab(k)}
                       style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: srTab === k ? 'var(--tc)' : 'var(--txD)', background: srTab === k ? 'var(--tcD)' : 'transparent', border: '1px solid ' + (srTab === k ? 'var(--tc)' : 'var(--bd)'), borderRadius: 100, padding: '6px 14px', cursor: 'pointer' }}>
                       {label} {n}
@@ -181,7 +213,7 @@ export default function Landing() {
                   ))}
                 </div>
               )}
-              {sr.clubs.length === 0 && sr.books.length === 0 && (
+              {sr.clubs.length === 0 && sr.books.length === 0 && olBooks.length === 0 && !olLoading && (
                 <div style={{ padding: 24, fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', textAlign: 'center' }}>No results for "{q}"</div>
               )}
               {(srTab === 'all' || srTab === 'clubs') && sr.clubs.length > 0 && <div>
@@ -200,7 +232,7 @@ export default function Landing() {
                 ))}
               </div>}
               {(srTab === 'all' || srTab === 'books') && sr.books.length > 0 && <div>
-                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Books</div>
+                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>On unscripted</div>
                 {sr.books.map(b => (
                   <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
                     onClick={() => router.push(`/book/${b.id}`)}>
@@ -212,6 +244,23 @@ export default function Landing() {
                         {b.tags.slice(0, 3).map(t => <span key={t} style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 600, letterSpacing: 0.5, color: 'var(--sg)', background: 'rgba(94,122,98,0.1)', borderRadius: 100, padding: '2px 8px' }}>{t}</span>)}
                       </div>}
                     </div>
+                  </div>
+                ))}
+              </div>}
+              {(srTab === 'all' || srTab === 'books') && (olLoading || olBooks.length > 0) && <div>
+                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>All books</div>
+                {olLoading && olBooks.length === 0 && <div style={{ padding: '12px 24px 20px', fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>Searching…</div>}
+                {olBooks.map(b => (
+                  <div key={b.key} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
+                    onClick={() => router.push(`/book/${b.key}`)}>
+                    {b.cover
+                      ? <img src={`https://covers.openlibrary.org/b/id/${b.cover}-S.jpg`} alt="" style={{ width: 28, height: 42, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }} />
+                      : <span style={{ fontSize: 20, width: 28, textAlign: 'center' }}>📖</span>}
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</div>
+                      <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.year ? ` · ${b.year}` : ''}</div>
+                    </div>
+                    <span style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--txD)', flexShrink: 0 }}>Not on unscripted</span>
                   </div>
                 ))}
               </div>}
