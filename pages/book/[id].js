@@ -12,35 +12,64 @@ export default function BookPage() {
   const [coverUrl, setCoverUrl] = useState(null)
   const [threadCount, setThreadCount] = useState(0)
   const [memberCount, setMemberCount] = useState(0)
+  const [notFound, setNotFound] = useState(false)
 
   useEffect(() => { if (id) loadBook() }, [id])
 
+  // Open Library work keys look like "OL12345W"; our own ids are UUIDs.
+  const isOLKey = typeof id === 'string' && /^OL\d+W$/i.test(id)
+
   async function loadBook() {
+    if (isOLKey) return loadOpenLibraryBook()
     const { data: b } = await supabase.from('books').select('*').eq('id', id).single()
-    if (!b) return
+    if (!b) { setNotFound(true); return }
     setBook(b)
     setBookKey(b.book_key)
+    await loadClubsFor(b.title)
+    fetchCover(b.title, b.author)
+  }
 
-    // All copies of this book across clubs (matched by title, same as before)
-    const { data: allBooks } = await supabase.from('books').select('*, club:clubs(*)').eq('title', b.title)
+  // A book that isn't on unscripted yet — details come from Open Library,
+  // then we still look for any clubs reading it by title.
+  async function loadOpenLibraryBook() {
+    try {
+      const r = await fetch(`https://openlibrary.org/search.json?q=key:/works/${id}&limit=1&fields=title,author_name,cover_i,subject,first_publish_year`)
+      const d = await r.json()
+      const doc = d.docs?.[0]
+      if (!doc) { setNotFound(true); return }
+      const b = {
+        id,
+        title: doc.title,
+        author: (doc.author_name || []).join(', '),
+        tags: (doc.subject || []).slice(0, 5),
+        first_year: doc.first_publish_year,
+        external: true,
+      }
+      setBook(b)
+      setBookKey(id)
+      if (doc.cover_i) setCoverUrl(`https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`)
+      else fetchCover(b.title, b.author)
+      await loadClubsFor(doc.title)
+    } catch { setNotFound(true) }
+  }
+
+  // Clubs reading a given title (shared by both paths)
+  async function loadClubsFor(title) {
+    const { data: allBooks } = await supabase.from('books').select('*, club:clubs(*)').eq('title', title)
     const rows = allBooks || []
     setClubs(rows.map(ab => ab.club).filter(Boolean))
 
     const bookIds = rows.map(r => r.id)
     const clubIds = rows.map(r => r.club_id).filter(Boolean)
 
-    // Stat: total discussion threads across every club reading this
     if (bookIds.length) {
       const { count } = await supabase.from('threads').select('id', { count: 'exact', head: true }).in('book_id', bookIds)
       setThreadCount(count || 0)
     }
-    // Stat: members across every club reading this
     if (clubIds.length) {
       const { count } = await supabase.from('club_members').select('id', { count: 'exact', head: true }).in('club_id', clubIds)
       setMemberCount(count || 0)
     }
-
-    fetchCover(b.title, b.author)
   }
 
   // Pull cover art live from Open Library (books table doesn't store one)
@@ -54,6 +83,7 @@ export default function BookPage() {
     } catch { /* no cover — placeholder shown */ }
   }
 
+  if (notFound) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}><div style={{ textAlign: 'center' }}><div style={{ fontFamily: 'var(--hd)', fontSize: 22, fontStyle: 'italic', color: 'var(--ink)', marginBottom: 12 }}>We couldn't find that book.</div><button className="join-btn" onClick={() => router.push('/')}>Back to Explore</button></div></div>
   if (!book) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontFamily: 'var(--ui)', color: 'var(--txD)' }}>Loading...</div></div>
 
   const hasClubs = clubs.length > 0
@@ -86,7 +116,8 @@ export default function BookPage() {
           <div style={{ textAlign: 'center', marginBottom: 20 }}>
             <div style={{ fontFamily: 'var(--hd)', fontSize: 34, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)', lineHeight: 1.15, marginBottom: 6 }}>{book.title}</div>
             <div style={{ fontFamily: 'var(--ui)', fontSize: 15, color: 'var(--txD)' }}>{book.author}</div>
-            <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--tc)', fontWeight: 600, marginTop: 8 }}>{clubs.length} club{clubs.length !== 1 ? 's' : ''} reading this on unscripted</div>
+            {book.first_year && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', marginTop: 4 }}>First published {book.first_year}</div>}
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: clubs.length ? 'var(--tc)' : 'var(--txD)', fontWeight: 600, marginTop: 8 }}>{clubs.length > 0 ? `${clubs.length} club${clubs.length !== 1 ? 's' : ''} reading this on unscripted` : 'No clubs on unscripted are reading this yet'}</div>
           </div>
 
           {tags.length > 0 && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 24 }}>
@@ -135,8 +166,9 @@ export default function BookPage() {
             ))}
 
             {clubs.length === 0 && <div style={{ background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 14, padding: '32px 24px', textAlign: 'center' }}>
-              <div style={{ fontFamily: 'var(--hd)', fontSize: 18, fontStyle: 'italic', color: 'var(--txD)', marginBottom: 12 }}>No clubs are reading this yet</div>
-              <button style={{ ...primaryBtn, flex: 'none' }} onClick={() => router.push('/signup')}>Be the first — start a club</button>
+              <div style={{ fontFamily: 'var(--hd)', fontSize: 18, fontStyle: 'italic', color: 'var(--txD)', marginBottom: 8 }}>No clubs are reading this yet</div>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.6, marginBottom: 16, maxWidth: 380, margin: '0 auto 16px' }}>Be the first to open this book up for conversation.</div>
+              <button style={{ ...primaryBtn, flex: 'none' }} onClick={() => router.push('/signup')}>Start a club for this book</button>
             </div>}
           </div>
         </div>
