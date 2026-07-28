@@ -28,7 +28,11 @@ export default function WritingPage() {
   const [notFound, setNotFound] = useState(false)
 
   useEffect(() => {
-    try { const sv = window.localStorage?.getItem?.('unscripted_user'); if (sv) setCurrentUser(JSON.parse(sv)) } catch (e) {}
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) return
+      const { data: member } = await supabase.from('members').select('*').eq('id', session.user.id).single()
+      if (member) setCurrentUser(member)
+    })
   }, [])
 
   useEffect(() => { if (id) load() }, [id])
@@ -55,7 +59,7 @@ export default function WritingPage() {
   }
 
   async function toggleFollow() {
-    if (!currentUser) { router.push('/signup'); return }
+    if (!currentUser) { router.push('/login?redirect=/writing/' + id); return }
     if (following) {
       await supabase.from('writing_follows').delete().eq('follower_member_id', currentUser.id).eq('writer_member_id', author.id)
     } else {
@@ -75,7 +79,10 @@ export default function WritingPage() {
       <div style={{ maxWidth: 640, margin: '0 auto', padding: '0 28px 80px' }}>
         <div style={{ padding: '32px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ cursor: 'pointer' }} onClick={() => router.push('/')}><Logo /></div>
-          {isOwner && <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer' }} onClick={() => router.push(`/write?id=${writing.id}`)}>Edit</button>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', background: 'none', border: 'none', cursor: 'pointer' }} onClick={() => router.push('/writing')}>← All writing</button>
+            {isOwner && <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer' }} onClick={() => router.push(`/write?id=${writing.id}`)}>Edit</button>}
+          </div>
         </div>
 
         <span style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--tc)' }}>{FORMAT_LABEL[writing.format]}</span>
@@ -85,7 +92,10 @@ export default function WritingPage() {
           <div style={{ cursor: 'pointer' }} onClick={() => router.push(`/profile/${author.id}`)}><MemberAvatar member={author} size={44} /></div>
           <div style={{ flex: 1 }}>
             <span style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)', cursor: 'pointer' }} onClick={() => router.push(`/profile/${author.id}`)}>{author.first_name} {author.last_name}</span>
-            <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>{timeAgo(writing.published_at)}{club ? ` · written for ${club.name}` : ''}</div>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>
+              {timeAgo(writing.published_at)}
+              {club && <>{' · written for '}<span style={{ color: 'var(--tc)', fontWeight: 600, cursor: 'pointer' }} onClick={() => router.push(`/club/${club.id}`)}>{club.name}</span></>}
+            </div>
           </div>
           {!isOwner && <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: following ? 'var(--sg)' : 'var(--ink)', background: following ? 'rgba(94,122,98,0.1)' : 'none', border: following ? 'none' : '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer' }} onClick={toggleFollow}>{following ? 'Following' : 'Follow'}</button>}
         </div>}
