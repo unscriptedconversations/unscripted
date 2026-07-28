@@ -13,25 +13,26 @@ export default function Write() {
   const router = useRouter()
   const { id } = router.query
   const [currentUser, setCurrentUser] = useState(null)
+  const [authChecked, setAuthChecked] = useState(false)
   const [myClubs, setMyClubs] = useState([])
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [format, setFormat] = useState('reflection')
   const [clubId, setClubId] = useState('')
+  const [tagsInput, setTagsInput] = useState('')
   const [writingId, setWritingId] = useState(null)
   const [isPublished, setIsPublished] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    try {
-      const sv = window.localStorage?.getItem?.('unscripted_user')
-      if (sv) {
-        const u = JSON.parse(sv)
-        setCurrentUser(u)
-        loadMyClubs(u.id)
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session) {
+        const { data: u } = await supabase.from('members').select('*').eq('id', session.user.id).single()
+        if (u) { setCurrentUser(u); loadMyClubs(u.id) }
       }
-    } catch (e) {}
+      setAuthChecked(true)
+    })
   }, [])
 
   useEffect(() => { if (id) loadWriting(id) }, [id])
@@ -49,6 +50,7 @@ export default function Write() {
       setContent(data.content)
       setFormat(data.format)
       setClubId(data.club_id || '')
+      setTagsInput((data.tags || []).join(', '))
       setIsPublished(data.is_published)
     }
   }
@@ -56,27 +58,30 @@ export default function Write() {
   async function save(publish) {
     if (!currentUser || !title.trim() || !content.trim()) return
     setSaving(true)
+    const tags = tagsInput.split(',').map(t => t.trim()).filter(Boolean)
     const payload = {
       member_id: currentUser.id,
       title: title.trim(),
       content: content.trim(),
       format,
       club_id: clubId || null,
+      tags,
       is_published: publish,
       published_at: publish ? new Date().toISOString() : null,
       updated_at: new Date().toISOString(),
     }
+    let savedId = writingId
     if (writingId) {
       await supabase.from('writings').update(payload).eq('id', writingId)
     } else {
       const { data } = await supabase.from('writings').insert(payload).select().single()
-      if (data) setWritingId(data.id)
+      if (data) { savedId = data.id; setWritingId(data.id) }
     }
     setIsPublished(publish)
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
-    if (publish && writingId) router.push(`/writing/${writingId}`)
+    if (publish && savedId) router.push(`/writing/${savedId}`)
   }
 
   const fl = { fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2.5, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 10, display: 'block' }
@@ -84,13 +89,18 @@ export default function Write() {
   const btn = { fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 10, padding: '14px 28px', cursor: 'pointer' }
   const btnO = { fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 10, padding: '13px 28px', cursor: 'pointer' }
 
+  if (!authChecked) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontFamily: 'var(--ui)', color: 'var(--txD)' }}>Loading…</div></div>
+
   if (!currentUser) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '0 28px' }}>
       <title>Write — unscripted</title>
       <div>
         <div style={{ marginBottom: 24 }}><Logo /></div>
         <div style={{ fontFamily: 'var(--hd)', fontSize: 28, fontWeight: 600, color: 'var(--ink)', marginBottom: 12 }}>You need an account to write.</div>
-        <button style={btn} onClick={() => router.push('/signup')}>Join unscripted</button>
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+          <button style={btnO} onClick={() => router.push('/login?redirect=/write')}>Log in</button>
+          <button style={btn} onClick={() => router.push('/signup')}>Join unscripted</button>
+        </div>
       </div>
     </div>
   )
@@ -126,6 +136,10 @@ export default function Write() {
           value={content}
           onChange={e => setContent(e.target.value)}
         />
+
+        <label style={fl}>Themes (optional)</label>
+        <input style={fi} placeholder="grief, identity, coming of age" value={tagsInput} onChange={e => setTagsInput(e.target.value)} />
+        <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginTop: -16, marginBottom: 28, lineHeight: 1.5 }}>Comma-separated. Helps readers find your writing by theme.</div>
 
         {myClubs.length > 0 && <div style={{ marginBottom: 32 }}>
           <label style={fl}>Tag a club (optional)</label>
