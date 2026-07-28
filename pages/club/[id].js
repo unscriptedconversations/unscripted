@@ -158,6 +158,7 @@ export default function ClubPage() {
   const [memberships, setMemberships] = useState([])
   const [settingsName, setSettingsName] = useState('')
   const [settingsDesc, setSettingsDesc] = useState('')
+  const [settingsThemes, setSettingsThemes] = useState('')
   const [settingsSaved, setSettingsSaved] = useState(false)
   const [leaveConfirm, setLeaveConfirm] = useState(false)
   const [inviteCopied, setInviteCopied] = useState(false)
@@ -220,7 +221,8 @@ export default function ClubPage() {
 
   async function loadClub() {
     const { data: c } = await supabase.from('clubs').select('*').eq('id', id).single()
-    if (c) { setClub(c); setSettingsName(c.name || ''); setSettingsDesc(c.description || '') }
+    if (c) { setClub(c); setSettingsName(c.name || ''); setSettingsDesc(c.description || '')
+        setSettingsThemes((c.tags || []).join(', ')) }
     const { data: cm } = await supabase.from('club_members').select('*, member:members(*)').eq('club_id', id)
     if (cm) {
       setMembers(cm.map(x => x.member).filter(Boolean))
@@ -360,12 +362,14 @@ export default function ClubPage() {
 
   async function saveClubSettings() {
     if (!club || !isHost) return
+    const themes = settingsThemes.split(',').map(t => t.trim()).filter(Boolean)
     const { error } = await supabase.from('clubs').update({
       name: settingsName.trim(),
       description: settingsDesc.trim(),
+      tags: themes,
     }).eq('id', id)
     if (!error) {
-      setClub(prev => ({ ...prev, name: settingsName.trim(), description: settingsDesc.trim() }))
+      setClub(prev => ({ ...prev, name: settingsName.trim(), description: settingsDesc.trim(), tags: themes }))
       setSettingsSaved(true)
       setTimeout(() => setSettingsSaved(false), 2500)
     }
@@ -717,6 +721,9 @@ export default function ClubPage() {
             <input className="field-input" value={settingsName} onChange={e => setSettingsName(e.target.value)} />
             <label className="field-label">Description</label>
             <textarea className="field-input" value={settingsDesc} onChange={e => setSettingsDesc(e.target.value)} rows={3} style={{ resize: 'vertical' }} />
+            <label className="field-label">Themes</label>
+            <input className="field-input" value={settingsThemes} onChange={e => setSettingsThemes(e.target.value)} placeholder="grief, identity, coming of age" />
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginTop: -12, marginBottom: 16, lineHeight: 1.5 }}>Comma-separated. Helps readers find this club by theme, not just name.</div>
             <button
               onClick={saveClubSettings}
               style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: settingsSaved ? 'var(--sg)' : 'var(--ink)', border: 'none', borderRadius: 10, padding: '13px 28px', cursor: 'pointer', transition: 'background 0.2s' }}
