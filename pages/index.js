@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
 
 let olTimer
+let wTimer
 
 export default function Landing() {
   const router = useRouter()
@@ -14,6 +15,7 @@ export default function Landing() {
   const [srTab, setSrTab] = useState('all')
   const [activeMap, setActiveMap] = useState({})
   const [olBooks, setOlBooks] = useState([])
+  const [wHits, setWHits] = useState([])
   const [olLoading, setOlLoading] = useState(false)
   const [recentPosts, setRecentPosts] = useState([])
   const [myMemberships, setMyMemberships] = useState(null)
@@ -79,7 +81,7 @@ export default function Landing() {
 
   function doSearch(val) {
     setQ(val)
-    if (val.length < 2) { setSR(null); setOlBooks([]); setOlLoading(false); return }
+    if (val.length < 2) { setSR(null); setOlBooks([]); setWHits([]); setOlLoading(false); return }
     const lv = val.toLowerCase()
     const clubHits = clubs.filter(c => c.name.toLowerCase().includes(lv))
     const bookHits = books.filter(b =>
@@ -90,6 +92,7 @@ export default function Landing() {
     setSR({ clubs: clubHits, books: bookHits })
     setSrTab('all')
     searchOpenLibrary(val)
+    searchWritings(val)
   }
 
   // Live catalog search (any published book, not just ones on unscripted).
@@ -116,6 +119,20 @@ export default function Landing() {
         setOlBooks(hits)
       } catch { setOlBooks([]) }
       setOlLoading(false)
+    }, 350)
+  }
+
+  function searchWritings(val) {
+    clearTimeout(wTimer)
+    wTimer = setTimeout(async () => {
+      const like = `%${val}%`
+      const { data } = await supabase
+        .from('writings')
+        .select('id, title, format, author:members(first_name, last_name)')
+        .eq('is_published', true)
+        .or(`title.ilike.${like},content.ilike.${like}`)
+        .limit(4)
+      setWHits(data || [])
     }, 350)
   }
 
@@ -169,6 +186,7 @@ export default function Landing() {
           <div className="brand"><Logo /></div>
           <div className="nav-links">
             <button className="nav-btn active">Explore</button>
+            <button className="nav-btn" onClick={() => router.push('/writing')}>Writing</button>
             {currentUser ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                 <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
@@ -264,6 +282,19 @@ export default function Landing() {
                   </div>
                 ))}
               </div>}
+              {(srTab === 'all') && wHits.length > 0 && <div>
+                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Writing</div>
+                {wHits.map(w => (
+                  <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }} onClick={() => router.push(`/writing/${w.id}`)}>
+                    <span style={{ fontSize: 18 }}>✍️</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{w.title}</div>
+                      <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{w.author ? `${w.author.first_name} ${w.author.last_name}` : ''}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>}
+              <div onClick={() => router.push(`/search?q=${encodeURIComponent(q)}`)} style={{ padding: '14px 24px', textAlign: 'center', cursor: 'pointer', fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--tc)', background: 'var(--sf2)' }}>See all results for "{q}" →</div>
             </div>}
           </div>
         </section>
