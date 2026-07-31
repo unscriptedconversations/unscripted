@@ -125,7 +125,7 @@ export default function BookPage() {
           </div>
 
           {tags.length > 0 && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 24 }}>
-            {tags.slice(0, 5).map(t => <span key={t} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, color: 'var(--sg)', background: 'rgba(94,122,98,0.1)', borderRadius: 100, padding: '5px 14px' }}>{t}</span>)}
+            {tags.slice(0, 5).map(t => <span key={t} onClick={() => router.push(`/bridge/theme/${encodeURIComponent(t)}`)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, color: 'var(--sg)', background: 'rgba(94,122,98,0.1)', borderRadius: 100, padding: '5px 14px', cursor: 'pointer' }}>{t}</span>)}
           </div>}
 
           {/* ── STAT CARDS ───────────────────────────────────────── */}
