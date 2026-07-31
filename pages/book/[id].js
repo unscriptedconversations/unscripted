@@ -145,12 +145,12 @@ export default function BookPage() {
           </div>
 
           {/* ── BRIDGE (preserved) ───────────────────────────────── */}
-          {clubs.length >= 2 && bookKey && <div style={{ background: 'var(--ink)', borderRadius: 14, padding: '20px 24px', marginBottom: 32, display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}
-            onClick={() => router.push(`/bridge/book/${encodeURIComponent(bookKey)}`)}>
+          {book.title && <div style={{ background: 'var(--ink)', borderRadius: 14, padding: '20px 24px', marginBottom: 32, display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}
+            onClick={() => router.push(`/bridge/book/${encodeURIComponent(book.title)}?author=${encodeURIComponent(book.author || '')}`)}>
             <span style={{ fontSize: 22 }}>↗</span>
             <div style={{ flex: 1 }}>
               <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: '#F2EBE0' }}>Join the global conversation</div>
-              <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'rgba(242,235,224,0.6)' }}>Readers across {clubs.length} clubs are discussing this book together</div>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'rgba(242,235,224,0.6)' }}>{clubs.length >= 2 ? `Readers across ${clubs.length} clubs are discussing this book` : 'Talk about this book with readers across unscripted'}</div>
             </div>
           </div>}
 
