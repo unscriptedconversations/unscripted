@@ -1,0 +1,171 @@
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/router'
+import { supabase } from '../../../lib/supabase'
+import Logo from '../../../components/Logo'
+
+function initialsFor(m) {
+  if (m?.initials) return m.initials
+  const f = (m?.first_name || '')[0] || ''
+  const l = (m?.last_name || '')[0] || ''
+  return (f + l).toUpperCase() || '?'
+}
+function Avatar({ member, size = 34 }) {
+  return <div style={{ width: size, height: size, borderRadius: '50%', background: member?.color || '#8B6E52', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.4, fontWeight: 700, fontFamily: 'var(--ui)', color: '#FFF', flexShrink: 0 }}>{initialsFor(member)}</div>
+}
+function timeAgo(date) {
+  const s = Math.floor((Date.now() - new Date(date)) / 1000)
+  if (s < 60) return 'now'
+  if (s < 3600) return Math.floor(s / 60) + 'm'
+  if (s < 86400) return Math.floor(s / 3600) + 'h'
+  return Math.floor(s / 86400) + 'd'
+}
+
+export default function BridgeBookThread() {
+  const router = useRouter()
+  const { key } = router.query
+  const [currentUser, setCurrentUser] = useState(null)
+  const [thread, setThread] = useState(null)
+  const [posts, setPosts] = useState([])
+  const [newPost, setNewPost] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [posting, setPosting] = useState(false)
+  const [myClubForBook, setMyClubForBook] = useState(null)
+
+  const title = typeof key === 'string' ? decodeURIComponent(key) : ''
+  const author = typeof router.query.author === 'string' ? router.query.author : ''
+  const anchor = title.toLowerCase().trim()
+
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) return
+      const { data: m } = await supabase.from('members').select('*').eq('id', session.user.id).single()
+      if (m) setCurrentUser(m)
+    })
+  }, [])
+
+  useEffect(() => { if (router.isReady && anchor) load() }, [router.isReady, anchor])
+
+  // Once we know the user, find whether they read this book in one of their clubs
+  useEffect(() => {
+    if (!currentUser || !title) return
+    supabase.from('books').select('club_id, club:clubs(name)').ilike('title', title).then(({ data }) => {
+      if (!data || !data.length) return
+      const clubIds = data.map(b => b.club_id).filter(Boolean)
+      supabase.from('club_members').select('club_id').eq('member_id', currentUser.id).in('club_id', clubIds).limit(1).maybeSingle().then(({ data: cm }) => {
+        if (cm) setMyClubForBook(cm.club_id)
+      })
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, title])
+
+  async function load() {
+    const { data: t } = await supabase.from('bridge_threads').select('*').eq('kind', 'book').eq('anchor', anchor).maybeSingle()
+    if (t) { setThread(t); await loadPosts(t.id) }
+    setLoading(false)
+  }
+
+  async function loadPosts(tid) {
+    const { data } = await supabase
+      .from('bridge_posts')
+      .select('*, author:members(id, first_name, last_name, initials, color), club:clubs(name)')
+      .eq('thread_id', tid)
+      .order('created_at', { ascending: true })
+    setPosts(data || [])
+  }
+
+  async function ensureThread() {
+    if (thread) return thread
+    const { data: existing } = await supabase.from('bridge_threads').select('*').eq('kind', 'book').eq('anchor', anchor).maybeSingle()
+    if (existing) { setThread(existing); return existing }
+    const { data: created, error } = await supabase.from('bridge_threads').insert({
+      kind: 'book', anchor, title: title, subtitle: author || null, created_by: currentUser.id, auto: false,
+    }).select().single()
+    if (error) return null
+    setThread(created)
+    return created
+  }
+
+  async function submitPost() {
+    if (!currentUser || !newPost.trim()) return
+    setPosting(true)
+    const t = await ensureThread()
+    if (!t) { setPosting(false); return }
+    await supabase.from('bridge_posts').insert({ thread_id: t.id, member_id: currentUser.id, content: newPost.trim(), club_id: myClubForBook || null })
+    await supabase.from('bridge_threads').update({ last_post_at: new Date().toISOString() }).eq('id', t.id)
+    setNewPost('')
+    setPosting(false)
+    loadPosts(t.id)
+  }
+
+  const clubsRepresented = [...new Set(posts.map(p => p.club?.name).filter(Boolean))]
+
+  return (
+    <div style={{ minHeight: '100vh' }}>
+      <title>{title} — Global conversation — unscripted</title>
+      <div className="shell">
+        <nav className="topnav">
+          <div className="brand" onClick={() => router.push('/')}><Logo /></div>
+          <div className="nav-links">
+            <button className="nav-btn" onClick={() => router.push('/')}>Explore</button>
+            <button className="nav-btn" onClick={() => router.push('/writing')}>Writing</button>
+          </div>
+        </nav>
+
+        <div style={{ maxWidth: 680, margin: '0 auto', paddingBottom: 100 }}>
+          <button className="profile-back" onClick={() => router.back()}>← Back</button>
+
+          {/* Header */}
+          <div style={{ background: 'var(--ink)', borderRadius: 18, padding: '32px 30px', margin: '20px 0 28px', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: 'linear-gradient(90deg, var(--tc), var(--sg))' }} />
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--tc)', marginBottom: 12 }}>↗ Global Conversation</div>
+            <div style={{ fontFamily: 'var(--hd)', fontSize: 30, fontWeight: 600, fontStyle: 'italic', color: '#F2EBE0', lineHeight: 1.15 }}>{title}</div>
+            {author && <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'rgba(242,235,224,0.5)', marginTop: 6 }}>{author}</div>}
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'rgba(242,235,224,0.6)', marginTop: 16, lineHeight: 1.6 }}>
+              A conversation for everyone reading this book — across every club.
+              {clubsRepresented.length > 0 && ` Readers here from ${clubsRepresented.slice(0, 3).join(', ')}${clubsRepresented.length > 3 ? ' and more' : ''}.`}
+            </div>
+          </div>
+
+          {/* Composer */}
+          {currentUser ? (
+            <div style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '18px 20px', marginBottom: 28 }}>
+              <textarea value={newPost} onChange={e => setNewPost(e.target.value)} placeholder="Share a thought with everyone reading this…" rows={3}
+                style={{ width: '100%', background: 'none', border: 'none', outline: 'none', resize: 'vertical', fontFamily: 'var(--ui)', fontSize: 15, color: 'var(--ink)', lineHeight: 1.6, boxSizing: 'border-box' }} />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                <button onClick={submitPost} disabled={posting || !newPost.trim()} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--tc)', border: 'none', borderRadius: 8, padding: '11px 22px', cursor: 'pointer', opacity: (posting || !newPost.trim()) ? 0.4 : 1 }}>{posting ? 'Posting…' : 'Post'}</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 14, padding: '24px', textAlign: 'center', marginBottom: 28 }}>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', marginBottom: 14 }}>Log in to join the conversation.</div>
+              <button className="join-btn" onClick={() => router.push('/login')}>Log in</button>
+            </div>
+          )}
+
+          {/* Posts */}
+          {loading ? (
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', padding: '24px 0' }}>Loading…</div>
+          ) : posts.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px 20px' }}>
+              <div style={{ fontSize: 36, marginBottom: 14 }}>💬</div>
+              <div style={{ fontFamily: 'var(--hd)', fontSize: 20, fontStyle: 'italic', color: 'var(--txD)' }}>No one's spoken yet.</div>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', marginTop: 8 }}>Be the first to open this book up to the whole community.</div>
+            </div>
+          ) : posts.map(p => (
+            <div key={p.id} style={{ display: 'flex', gap: 14, padding: '18px 0', borderBottom: '1px solid var(--bd)' }}>
+              <div style={{ cursor: 'pointer' }} onClick={() => p.author && router.push(`/profile/${p.author.id}`)}><Avatar member={p.author} size={38} /></div>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, color: 'var(--ink)', cursor: 'pointer' }} onClick={() => p.author && router.push(`/profile/${p.author.id}`)}>{p.author ? `${p.author.first_name} ${p.author.last_name}` : 'Unknown'}</span>
+                  {p.club?.name && <span style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 600, color: 'var(--sg)', background: 'rgba(94,122,98,0.1)', borderRadius: 100, padding: '2px 8px' }}>{p.club.name}</span>}
+                  <span style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginLeft: 'auto' }}>{timeAgo(p.created_at)}</span>
+                </div>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--ink)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{p.content}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
