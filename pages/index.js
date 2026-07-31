@@ -187,6 +187,7 @@ export default function Landing() {
           <div className="nav-links">
             <button className="nav-btn active">Explore</button>
             <button className="nav-btn" onClick={() => router.push('/writing')}>Writing</button>
+            <button className="nav-btn" onClick={() => router.push('/bridge')}>Bridge</button>
             {currentUser ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                 <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
