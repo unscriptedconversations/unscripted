@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
+import NotificationBell from '../components/NotificationBell'
 
 let olTimer
 let wTimer
@@ -190,6 +191,7 @@ export default function Landing() {
             <button className="nav-btn" onClick={() => router.push('/bridge')}>Bridge</button>
             {currentUser ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <NotificationBell currentUser={currentUser} />
                 <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
                   <span className="user-nav-name">{currentUser.first_name}</span>
                 </div>
