@@ -69,8 +69,8 @@ export default function ProfilePage() {
     if (m) setMember(m)
     const { data: w } = await supabase.from('writings').select('*').eq('member_id', id).order('created_at', { ascending: false })
     if (w) setWritings(w)
-    const { data: cm } = await supabase.from('club_members').select('club:clubs(id, name, description)').eq('member_id', id)
-    if (cm) setClubs(cm.map(x => x.club).filter(Boolean))
+    const { data: cm } = await supabase.from('club_members').select('pinned, club:clubs(id, name, description)').eq('member_id', id)
+    if (cm) setClubs(cm.filter(x => x.club).map(x => ({ ...x.club, pinned: x.pinned })).sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)))
     const { count } = await supabase.from('writing_follows').select('id', { count: 'exact', head: true }).eq('writer_member_id', id)
     setFollowerCount(count || 0)
   }
@@ -132,6 +132,11 @@ export default function ProfilePage() {
   if (!member) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontFamily: 'var(--ui)', color: 'var(--txD)' }}>Loading...</div></div>
 
   const isOwner = currentUser && currentUser.id === member.id
+
+  async function togglePin(clubId, next) {
+    setClubs(cs => cs.map(c => c.id === clubId ? { ...c, pinned: next } : c).sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)))
+    await supabase.from('club_members').update({ pinned: next }).eq('club_id', clubId).eq('member_id', currentUser.id)
+  }
   const published = writings.filter(w => w.is_published)
   const drafts = writings.filter(w => !w.is_published)
 
@@ -235,9 +240,10 @@ export default function ProfilePage() {
           {clubs.length > 0 ? clubs.map(c => (
             <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '18px 20px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 12, marginBottom: 10, cursor: 'pointer' }} onClick={() => router.push(`/club/${c.id}`)}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>{c.name}</div>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>{c.pinned ? '📌 ' : ''}{c.name}</div>
                 <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{c.description}</div>
               </div>
+              {isOwner && <button onClick={e => { e.stopPropagation(); togglePin(c.id, !c.pinned) }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, opacity: c.pinned ? 1 : 0.35, flexShrink: 0 }} aria-label={c.pinned ? 'Unpin' : 'Pin'}>📌</button>}
             </div>
           )) : <><div style={{ fontFamily: 'var(--hd)', fontSize: 16, fontStyle: 'italic', color: 'var(--txD)', padding: '24px 0' }}>Not in any clubs yet.</div><div style={{ marginTop: 16 }}><button style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 8, padding: '11px 20px', cursor: 'pointer' }} onClick={() => router.push('/create')}>Start a club</button></div></>}
         </div>}
