@@ -16,6 +16,10 @@ const VERB = {
   reply: 'replied to you',
   club_post: 'posted',
 }
+function clubPostText(n) {
+  const c = n.count || 1
+  return `${c} new post${c === 1 ? '' : 's'} in ${n.preview || 'your club'}`
+}
 
 export default function NotificationBell({ currentUser }) {
   const router = useRouter()
@@ -81,8 +85,9 @@ export default function NotificationBell({ currentUser }) {
             <div key={n.id} onClick={() => go(n)} style={{ display: 'flex', gap: 10, padding: '14px 18px', borderBottom: '1px solid var(--bd)', cursor: 'pointer', background: n.is_read ? 'none' : 'rgba(194,122,90,0.05)' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--ink)', lineHeight: 1.5 }}>
-                  <span style={{ fontWeight: 700 }}>{n.actor ? `${n.actor.first_name} ${n.actor.last_name}` : 'Someone'}</span>{' '}
-                  {VERB[n.type] || 'sent a notification'}{n.preview ? <span style={{ color: 'var(--txD)' }}>{n.type === 'club_post' ? ` in ${n.preview}` : `: “${n.preview}”`}</span> : ''}
+                  {n.type === 'club_post'
+                    ? <span style={{ fontWeight: 700 }}>{clubPostText(n)}</span>
+                    : <><span style={{ fontWeight: 700 }}>{n.actor ? `${n.actor.first_name} ${n.actor.last_name}` : 'Someone'}</span>{' '}{VERB[n.type] || 'sent a notification'}{n.preview ? <span style={{ color: 'var(--txD)' }}>{`: “${n.preview}”`}</span> : ''}</>}
                 </div>
                 <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginTop: 3 }}>{timeAgo(n.created_at)}</div>
               </div>
