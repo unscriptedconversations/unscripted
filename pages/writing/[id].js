@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
 import Logo from '../../components/Logo'
+import { createNotification } from '../../lib/notify'
 
 function MemberAvatar({ member, size = 36 }) {
   return <div style={{ width: size, height: size, borderRadius: '50%', background: member?.color || '#8B6E52', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.34, fontWeight: 700, fontFamily: 'var(--ui)', color: '#FFF', flexShrink: 0 }}>{member?.initials || '?'}</div>
@@ -64,6 +65,7 @@ export default function WritingPage() {
       await supabase.from('writing_follows').delete().eq('follower_member_id', currentUser.id).eq('writer_member_id', author.id)
     } else {
       await supabase.from('writing_follows').insert({ follower_member_id: currentUser.id, writer_member_id: author.id })
+      createNotification({ recipientId: author.id, actorId: currentUser.id, type: 'follow', link: `/profile/${currentUser.id}` })
     }
     setFollowing(!following)
   }
