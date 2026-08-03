@@ -3,6 +3,8 @@ import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
 import Logo from '../../components/Logo'
 import Tag from '../../components/Tag'
+import NotificationBell from '../../components/NotificationBell'
+import { notifyMentions } from '../../lib/notify'
 
 function timeAgo(date) {
   const s = Math.floor((Date.now() - new Date(date)) / 1000)
@@ -280,6 +282,7 @@ export default function ClubPage() {
     if (!newPost.trim() || !currentUser) return
     const tag = document.getElementById('club-tag-select')?.value || 'community'
     await supabase.from('posts').insert({ member_id: currentUser.id, content: newPost.trim(), tag, sitting_with: newSit.trim() || null, themes: newThemes.trim() || null, club_id: id })
+    notifyMentions({ text: newPost, members, actorId: currentUser.id, link: `/club/${id}`, preview: newPost.trim().slice(0, 60) })
     await bumpWriteStreak()
     await markHasPosted()
     setNewPost(''); setNewSit(''); setNewThemes(''); loadClub()
@@ -288,6 +291,7 @@ export default function ClubPage() {
   async function submitThreadPost() {
     if (!threadNewPost.trim() || !currentUser || !activeThread) return
     await supabase.from('thread_replies').insert({ thread_id: activeThread.id, member_id: currentUser.id, content: threadNewPost.trim(), sitting_with: threadNewSit.trim() || null, themes: threadNewThemes.trim() || null })
+    notifyMentions({ text: threadNewPost, members, actorId: currentUser.id, link: `/club/${id}`, preview: threadNewPost.trim().slice(0, 60) })
     await bumpWriteStreak()
     await markHasPosted()
     setThreadNewPost(''); setThreadNewSit(''); setThreadNewThemes(''); loadThreadPosts(activeThread.id)
@@ -296,6 +300,7 @@ export default function ClubPage() {
   async function submitReply(parentId) {
     if (!replyText.trim() || !currentUser || !activeThread) return
     await supabase.from('thread_replies').insert({ thread_id: activeThread.id, member_id: currentUser.id, content: replyText.trim(), parent_reply_id: parentId })
+    notifyMentions({ text: replyText, members, actorId: currentUser.id, link: `/club/${id}`, preview: replyText.trim().slice(0, 60) })
     await bumpWriteStreak()
     await markHasPosted()
     setReplyText(''); setReplyingTo(null); setExpandedReplies(p => ({ ...p, [parentId]: true })); loadThreadPosts(activeThread.id)
@@ -555,6 +560,7 @@ export default function ClubPage() {
             <button className="nav-btn active">{club.name}</button>
             {currentUser ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <NotificationBell currentUser={currentUser} />
                 <div className="user-nav" onClick={() => openProfile(currentUser)}>
                   <MemberAvatar member={currentUser} size={32} />
                   <span className="user-nav-name">{currentUser.first_name}</span>
