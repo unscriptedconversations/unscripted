@@ -191,6 +191,7 @@ export default function Landing() {
             <button className="nav-btn" onClick={() => router.push('/bridge')}>Bridge</button>
             {currentUser ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <button className="nav-btn" onClick={() => router.push('/create')}>+ Club</button>
                 <NotificationBell currentUser={currentUser} />
                 <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
                   <span className="user-nav-name">{currentUser.first_name}</span>
@@ -315,7 +316,7 @@ export default function Landing() {
             </div>
             <div style={{ display: 'flex', gap: 12 }}>
               <button className="join-btn" style={{ background: 'var(--tc)', color: 'var(--ink)' }}>Find a club reading this</button>
-              <button className="join-btn" style={{ background: 'none', border: '1.5px solid rgba(242,235,224,0.2)', color: '#F2EBE0' }} onClick={() => router.push('/signup')}>Start your own</button>
+              <button className="join-btn" style={{ background: 'none', border: '1.5px solid rgba(242,235,224,0.2)', color: '#F2EBE0' }} onClick={() => router.push(currentUser ? '/create' : '/signup')}>Start your own</button>
             </div>
           </div>
         </section>
@@ -403,7 +404,7 @@ export default function Landing() {
                   Be the first to start a reading community on unscripted.
                 </div>
                 <button
-                  onClick={() => router.push('/signup')}
+                  onClick={() => router.push(currentUser ? '/create' : '/signup')}
                   style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 10, padding: '12px 24px', cursor: 'pointer' }}
                 >
                   Start the first club
