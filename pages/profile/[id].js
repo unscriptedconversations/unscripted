@@ -3,6 +3,8 @@ import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
 import { updateColor } from '../../lib/auth'
 import Logo from '../../components/Logo'
+import NotificationBell from '../../components/NotificationBell'
+import { createNotification } from '../../lib/notify'
 
 const COLORS = ['#8B6E52', '#5E7A62', '#C27A5A', '#6B6590', '#52708B', '#7A5278', '#8B7E52', '#8B5E5E', '#8B6E6E']
 
@@ -85,6 +87,7 @@ export default function ProfilePage() {
       setFollowerCount(c => c - 1)
     } else {
       await supabase.from('writing_follows').insert({ follower_member_id: currentUser.id, writer_member_id: id })
+      createNotification({ recipientId: id, actorId: currentUser.id, type: 'follow', link: `/profile/${currentUser.id}` })
       setFollowerCount(c => c + 1)
     }
     setFollowing(!following)
@@ -138,7 +141,7 @@ export default function ProfilePage() {
       <div style={{ maxWidth: 640, margin: '0 auto', padding: '0 28px 80px' }}>
         <div style={{ padding: '32px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ cursor: 'pointer' }} onClick={() => router.push('/')}><Logo /></div>
-          {isOwner && <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer' }} onClick={() => router.push('/write')}>+ Write</button>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>{isOwner && <NotificationBell currentUser={currentUser} />}{isOwner && <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer' }} onClick={() => router.push('/write')}>+ Write</button>}</div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 12 }}>
