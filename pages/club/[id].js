@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase'
 import Logo from '../../components/Logo'
 import Tag from '../../components/Tag'
 import NotificationBell from '../../components/NotificationBell'
-import { notifyMentions } from '../../lib/notify'
+import { notifyMentions, createNotification, notifyClubPost } from '../../lib/notify'
 
 function timeAgo(date) {
   const s = Math.floor((Date.now() - new Date(date)) / 1000)
@@ -283,6 +283,7 @@ export default function ClubPage() {
     const tag = document.getElementById('club-tag-select')?.value || 'community'
     await supabase.from('posts').insert({ member_id: currentUser.id, content: newPost.trim(), tag, sitting_with: newSit.trim() || null, themes: newThemes.trim() || null, club_id: id })
     notifyMentions({ text: newPost, members, actorId: currentUser.id, link: `/club/${id}`, preview: newPost.trim().slice(0, 60) })
+    notifyClubPost({ recipients: members.map(m => m.id), actorId: currentUser.id, clubId: id, clubName: club?.name })
     await bumpWriteStreak()
     await markHasPosted()
     setNewPost(''); setNewSit(''); setNewThemes(''); loadClub()
@@ -301,6 +302,8 @@ export default function ClubPage() {
     if (!replyText.trim() || !currentUser || !activeThread) return
     await supabase.from('thread_replies').insert({ thread_id: activeThread.id, member_id: currentUser.id, content: replyText.trim(), parent_reply_id: parentId })
     notifyMentions({ text: replyText, members, actorId: currentUser.id, link: `/club/${id}`, preview: replyText.trim().slice(0, 60) })
+    const parent = threadPosts.find(tp => tp.id === parentId)
+    if (parent?.member_id) createNotification({ recipientId: parent.member_id, actorId: currentUser.id, type: 'reply', link: `/club/${id}`, preview: replyText.trim().slice(0, 60) })
     await bumpWriteStreak()
     await markHasPosted()
     setReplyText(''); setReplyingTo(null); setExpandedReplies(p => ({ ...p, [parentId]: true })); loadThreadPosts(activeThread.id)
