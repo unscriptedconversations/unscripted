@@ -121,7 +121,7 @@ export default function BookPage() {
 
           <div style={{ textAlign: 'center', marginBottom: 20 }}>
             <div style={{ fontFamily: 'var(--hd)', fontSize: 34, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)', lineHeight: 1.15, marginBottom: 6 }}>{book.title}</div>
-            <div style={{ fontFamily: 'var(--ui)', fontSize: 15, color: 'var(--txD)' }}>{book.author}</div>
+            {book.author && <div style={{ fontFamily: 'var(--ui)', fontSize: 15, color: 'var(--txD)' }}>{book.author.split(',').map((a, i, arr) => { const nm = a.trim(); return nm ? <span key={i}><span onClick={() => router.push(`/author/${encodeURIComponent(nm)}`)} style={{ color: 'var(--tc)', fontWeight: 600, cursor: 'pointer' }}>{nm}</span>{i < arr.length - 1 ? ', ' : ''}</span> : null })}</div>}
             {book.first_year && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', marginTop: 4 }}>First published {book.first_year}</div>}
             <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: clubs.length ? 'var(--tc)' : 'var(--txD)', fontWeight: 600, marginTop: 8 }}>{clubs.length > 0 ? `${clubs.length} club${clubs.length !== 1 ? 's' : ''} reading this on unscripted` : 'No clubs on unscripted are reading this yet'}</div>
           </div>
