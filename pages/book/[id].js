@@ -83,8 +83,10 @@ export default function BookPage() {
     } catch { /* no cover — placeholder shown */ }
   }
 
-  function startClub() {
-    router.push(`/signup?bookTitle=${encodeURIComponent(book.title)}&bookAuthor=${encodeURIComponent(book.author || '')}`)
+  async function startClub() {
+    const q = `bookTitle=${encodeURIComponent(book.title)}&bookAuthor=${encodeURIComponent(book.author || '')}`
+    const { data: { session } } = await supabase.auth.getSession()
+    router.push(session ? `/create?${q}` : `/signup?${q}`)
   }
 
   if (notFound) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}><div style={{ textAlign: 'center' }}><div style={{ fontFamily: 'var(--hd)', fontSize: 22, fontStyle: 'italic', color: 'var(--ink)', marginBottom: 12 }}>We couldn't find that book.</div><button className="join-btn" onClick={() => router.push('/')}>Back to Explore</button></div></div>
