@@ -260,6 +260,19 @@ export default function Signup() {
           title: `Open Discussion: ${clubData.bookTitle}`, is_active: true,
         })
       }
+
+      // Bridge: if 2+ clubs now read this title, open a book conversation (never clobbers an existing one).
+      if (book) {
+        const t = clubData.bookTitle.trim()
+        const { data: reading } = await supabase.from('books').select('club_id').ilike('title', t)
+        const distinctClubs = new Set((reading || []).map(r => r.club_id).filter(Boolean))
+        if (distinctClubs.size >= 2) {
+          await supabase.from('bridge_threads').upsert(
+            { kind: 'book', anchor: t.toLowerCase(), title: t, subtitle: (clubData.bookAuthor || '').trim() || null, created_by: memberId, auto: true },
+            { onConflict: 'kind,anchor', ignoreDuplicates: true }
+          )
+        }
+      }
     }
     return club
   }
