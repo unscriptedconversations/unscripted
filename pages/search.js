@@ -25,6 +25,7 @@ export default function SearchPage() {
   const [books, setBooks] = useState([])
   const [writings, setWritings] = useState([])
   const [authors, setAuthors] = useState([])
+  const [bridges, setBridges] = useState([])
   const [olBooks, setOlBooks] = useState([])
   const [tab, setTab] = useState('all')
   const [loading, setLoading] = useState(false)
@@ -46,16 +47,34 @@ export default function SearchPage() {
     const lv = term.toLowerCase()
     const like = `%${term}%`
 
-    const [cR, bR, wR, aR] = await Promise.all([
+    const [cR, bR, wR, aR, brR] = await Promise.all([
       supabase.from('clubs').select('id, name, description, privacy, tagline, tags').or(`name.ilike.${like},description.ilike.${like},tagline.ilike.${like},tags.cs.{${term}}`).limit(20),
       supabase.from('books').select('id, title, author, tags, club:clubs(name)').or(`title.ilike.${like},author.ilike.${like},tags.cs.{${term}}`).limit(20),
       supabase.from('writings').select('id, title, content, format, published_at, member_id, tags, author:members(id, first_name, last_name, initials, color)').eq('is_published', true).or(`title.ilike.${like},content.ilike.${like},tags.cs.{${term}}`).limit(20),
       supabase.from('members').select('id, first_name, last_name, initials, color').or(`first_name.ilike.${like},last_name.ilike.${like}`).limit(12),
+      supabase.from('bridge_threads').select('*').or(`title.ilike.${like},anchor.ilike.${like}`).limit(12),
     ])
     setClubs(cR.data || [])
     setBooks(bR.data || [])
     setWritings(wR.data || [])
     setAuthors(aR.data || [])
+
+    // Bridge threads → attach reader/post counts (one pass over their posts)
+    const brThreads = brR.data || []
+    if (brThreads.length) {
+      const ids = brThreads.map(t => t.id)
+      const { data: ps } = await supabase.from('bridge_posts').select('thread_id, member_id, club_id').in('thread_id', ids)
+      const st = {}
+      for (const p of (ps || [])) {
+        const s = st[p.thread_id] || (st[p.thread_id] = { m: new Set(), c: new Set(), n: 0 })
+        if (p.member_id) s.m.add(p.member_id)
+        if (p.club_id) s.c.add(p.club_id)
+        s.n++
+      }
+      setBridges(brThreads.map(t => { const s = st[t.id] || { m: new Set(), c: new Set(), n: 0 }; return { ...t, readers: s.m.size, clubs: s.c.size, postCount: s.n } }))
+    } else {
+      setBridges([])
+    }
     setLoading(false)
 
     // Wider catalog (Open Library), deduped against on-platform titles
@@ -76,7 +95,7 @@ export default function SearchPage() {
   function submit(e) { e?.preventDefault?.(); runSearch() }
 
   const show = t => tab === 'all' || tab === t
-  const totalOnSite = clubs.length + books.length + writings.length + authors.length + olBooks.length
+  const totalOnSite = clubs.length + books.length + writings.length + authors.length + bridges.length + olBooks.length
   const preview = t => (t || '').length > 160 ? t.slice(0, 160) + '…' : t
 
   const rowStyle = { display: 'flex', alignItems: 'center', gap: 14, padding: '16px 20px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 12, marginBottom: 10, cursor: 'pointer' }
@@ -108,7 +127,7 @@ export default function SearchPage() {
 
           {/* Type filter */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '16px 0 8px' }}>
-            {[['all', 'All'], ['books', 'Books'], ['clubs', 'Clubs'], ['writings', 'Writing'], ['authors', 'Authors']].map(([k, l]) => (
+            {[['all', 'All'], ['books', 'Books'], ['clubs', 'Clubs'], ['writings', 'Writing'], ['bridges', 'Bridge'], ['authors', 'Authors']].map(([k, l]) => (
               <button key={k} onClick={() => setTab(k)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: tab === k ? 'var(--tc)' : 'var(--txD)', background: tab === k ? 'var(--tcD)' : 'transparent', border: '1px solid ' + (tab === k ? 'var(--tc)' : 'var(--bd)'), borderRadius: 100, padding: '7px 16px', cursor: 'pointer' }}>{l}</button>
             ))}
           </div>
@@ -172,6 +191,20 @@ export default function SearchPage() {
               <div key={a.id} style={rowStyle} onClick={() => router.push(`/profile/${a.id}`)}>
                 <Avatar member={a} size={36} />
                 <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>{a.first_name} {a.last_name}</div>
+              </div>
+            ))}
+          </div>}
+
+          {/* BRIDGE CONVERSATIONS */}
+          {show('bridges') && bridges.length > 0 && <div>
+            <SectionLabel>Conversations</SectionLabel>
+            {bridges.map(t => (
+              <div key={t.id} style={rowStyle} onClick={() => t.kind === 'book' ? router.push(`/bridge/book/${encodeURIComponent(t.title)}${t.subtitle ? `?author=${encodeURIComponent(t.subtitle)}` : ''}`) : router.push(`/bridge/theme/${encodeURIComponent(t.title || t.anchor)}`)}>
+                <span style={{ fontSize: 20, width: 24, textAlign: 'center', flexShrink: 0 }}>{t.kind === 'book' ? '📖' : '◆'}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: t.kind === 'book' ? 'italic' : 'normal', color: 'var(--ink)' }}>{t.title}</div>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginTop: 2 }}>{[t.clubs > 0 && `${t.clubs} club${t.clubs !== 1 ? 's' : ''}`, `${t.readers} reader${t.readers !== 1 ? 's' : ''}`, `${t.postCount} post${t.postCount !== 1 ? 's' : ''}`].filter(Boolean).join(' · ')}</div>
+                </div>
               </div>
             ))}
           </div>}
