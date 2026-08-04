@@ -28,6 +28,9 @@ export default function BridgeThemeThread() {
   const [posts, setPosts] = useState([])
   const [relBooks, setRelBooks] = useState([])
   const [relWritings, setRelWritings] = useState([])
+  const [relClubs, setRelClubs] = useState([])
+  const [bookCount, setBookCount] = useState(0)
+  const [readerCount, setReaderCount] = useState(0)
   const [newPost, setNewPost] = useState('')
   const [loading, setLoading] = useState(true)
   const [posting, setPosting] = useState(false)
@@ -51,12 +54,22 @@ export default function BridgeThemeThread() {
     if (t) { setThread(t); await loadPosts(t.id) }
     // Things carrying this theme (tag containment)
     const tagFilter = `{${theme}}`
-    const [bk, wr] = await Promise.all([
+    const [bk, wr, cl, bc] = await Promise.all([
       supabase.from('books').select('id, title, author').filter('tags', 'cs', tagFilter).limit(8),
       supabase.from('writings').select('id, title, format').eq('is_published', true).filter('tags', 'cs', tagFilter).limit(8),
+      supabase.from('clubs').select('id, name, description, privacy').filter('tags', 'cs', tagFilter).limit(12),
+      supabase.from('books').select('id', { count: 'exact', head: true }).filter('tags', 'cs', tagFilter),
     ])
     setRelBooks(bk.data || [])
     setRelWritings(wr.data || [])
+    setRelClubs(cl.data || [])
+    setBookCount(bc.count || 0)
+
+    const clubIds = (cl.data || []).map(c => c.id)
+    if (clubIds.length) {
+      const { count } = await supabase.from('club_members').select('id', { count: 'exact', head: true }).in('club_id', clubIds)
+      setReaderCount(count || 0)
+    }
     setLoading(false)
   }
 
@@ -119,6 +132,25 @@ export default function BridgeThemeThread() {
               A conversation about {label.toLowerCase()} — spanning every book and every club that touches it.
             </div>
           </div>
+
+          {/* Discovery: stats + clubs in this genre */}
+          {relClubs.length > 0 && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--tc)', marginBottom: 18 }}>
+            {[`${relClubs.length} club${relClubs.length !== 1 ? 's' : ''}`, `${bookCount} book${bookCount !== 1 ? 's' : ''}`, `${readerCount} reader${readerCount !== 1 ? 's' : ''}`].join(' · ')}
+          </div>}
+
+          {relClubs.length > 0 && <div style={{ marginBottom: 28 }}>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 12 }}>Clubs in this genre</div>
+            {relClubs.map(c => (
+              <div key={c.id} onClick={() => router.push(`/club/${c.id}`)} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '16px 18px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, marginBottom: 10, cursor: 'pointer' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 15, fontWeight: 700, color: 'var(--ink)' }}>{c.name}</div>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>{c.description}</div>
+                </div>
+                <span className="tag" style={{ background: c.privacy === 'open' ? 'rgba(94,122,98,0.1)' : 'var(--tcD)', color: c.privacy === 'open' ? 'var(--sg)' : 'var(--tc)' }}>{c.privacy}</span>
+                <span style={{ fontFamily: 'var(--ui)', fontSize: 10, color: 'var(--tc)', fontWeight: 600 }}>→</span>
+              </div>
+            ))}
+          </div>}
 
           {/* Related works carrying this theme */}
           {(relBooks.length > 0 || relWritings.length > 0) && <div style={{ marginBottom: 28 }}>
