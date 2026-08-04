@@ -19,6 +19,7 @@ export default function CreateClub() {
   const [bkR, setBkR] = useState([])
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
+  const [intentAuthor, setIntentAuthor] = useState('') // arrived via "Start a club for this author"
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -34,8 +35,21 @@ export default function CreateClub() {
   useEffect(() => {
     if (!router.isReady) return
     if (router.query.bookTitle) { setBookTitle(String(router.query.bookTitle)); setBkQ(String(router.query.bookTitle)) }
-    if (router.query.bookAuthor) setBookAuthor(String(router.query.bookAuthor))
+    if (router.query.bookAuthor) {
+      setBookAuthor(String(router.query.bookAuthor))
+      if (!router.query.bookTitle) setIntentAuthor(String(router.query.bookAuthor))
+    }
   }, [router.isReady])
+
+  // Author-only arrival ("Start a club for this author"): surface their books
+  // to pick from without treating the author name as a title.
+  async function showAuthorBooks(author) {
+    try {
+      const r = await fetch(`https://openlibrary.org/search.json?author=${encodeURIComponent(author)}&limit=6&fields=title,author_name`)
+      const d = await r.json()
+      setBkR((d.docs || []).map(x => ({ title: x.title, author: (x.author_name || [])[0] || author })))
+    } catch { setBkR([]) }
+  }
 
   async function searchBook(v) {
     setBkQ(v); setBookTitle(v)
@@ -146,6 +160,11 @@ export default function CreateClub() {
               </div>
             ))}
           </div>
+
+          {intentAuthor && !bookTitle.trim() && <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--tcD)', border: '1px solid rgba(194,122,90,0.25)', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
+            <div style={{ flex: 1, fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--ink)', lineHeight: 1.5 }}>Starting a club for <b>{intentAuthor}</b> — pick one of their books, or search any title.</div>
+            <button onClick={() => showAuthorBooks(intentAuthor)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: 'var(--tc)', background: 'none', border: '1.5px solid var(--tc)', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>Show books</button>
+          </div>}
 
           <label style={fl}>First book (optional)</label>
           <div style={{ position: 'relative', marginBottom: 16 }}>
