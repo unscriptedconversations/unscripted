@@ -99,6 +99,19 @@ export default function CreateClub() {
       } else if (book) {
         await supabase.from('threads').insert({ book_id: book.id, chapter_number: 0, title: `Open Discussion: ${bookTitle.trim()}`, is_active: true })
       }
+
+      // Bridge: if 2+ clubs now read this title, open a book conversation (never clobbers an existing one).
+      if (book) {
+        const t = bookTitle.trim()
+        const { data: reading } = await supabase.from('books').select('club_id').ilike('title', t)
+        const distinctClubs = new Set((reading || []).map(r => r.club_id).filter(Boolean))
+        if (distinctClubs.size >= 2) {
+          await supabase.from('bridge_threads').upsert(
+            { kind: 'book', anchor: t.toLowerCase(), title: t, subtitle: bookAuthor.trim() || null, created_by: currentUser.id, auto: true },
+            { onConflict: 'kind,anchor', ignoreDuplicates: true }
+          )
+        }
+      }
     }
 
     router.push(`/club/${club.id}`)
