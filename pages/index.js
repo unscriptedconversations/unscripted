@@ -3,6 +3,7 @@ import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
 import NotificationBell from '../components/NotificationBell'
+import Recommendations from '../components/Recommendations'
 
 let olTimer
 let wTimer
@@ -320,6 +321,9 @@ export default function Landing() {
             </div>
           </div>
         </section>
+
+        {/* RECOMMENDED FOR YOU */}
+        {currentUser && <Recommendations />}
 
         {/* AD BANNER */}
         <a href="https://thelitbar.com" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', color: 'inherit' }}>
