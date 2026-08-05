@@ -107,7 +107,7 @@ export default function ProfilePage() {
     const { data: rows } = await supabase.from('writing_follows').select(other).eq(col, id)
     const ids = [...new Set((rows || []).map(r => r[other]).filter(Boolean))]
     if (ids.length) {
-      const { data: ms } = await supabase.from('members').select('id, first_name, last_name, initials, color').in('id', ids)
+      const { data: ms } = await supabase.from('members').select('id, first_name, last_name, initials, color').in('id', ids).or('status.is.null,status.neq.disabled')
       setListMembers(ms || [])
     }
     setListLoading(false)
