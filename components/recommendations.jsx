@@ -1,196 +1,104 @@
-// components/Recommendations.jsx
-// "Recommended for you" rail for the homepage.
-// Self-contained: resolves its own session, loads the signals, calls the pure
-// scoring in lib/recommend, and renders nothing when logged out or when there's
-// nothing worth showing (no layout jank). Mounting is a one-line drop-in.
+// pages/api/recommend.js
+// v2 LLM layer for recommendations. Takes the heuristic shortlist, asks a small
+// fast model to curate/re-order it and write a one-line reason per pick.
+//
+// STRICTLY ADDITIVE: if ANTHROPIC_API_KEY is unset or anything fails, this
+// returns empty lists (not an error), so the client falls back to the heuristic
+// order with no blurbs. v1 never breaks.
+//
+// Requires env var ANTHROPIC_API_KEY (set in Vercel → Project → Settings → Env
+// Vars, Production + Preview). The key stays server-side; never sent to client.
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/router'
-import { supabase } from '../lib/supabase'
-import { recommendBooks, recommendClubs } from '../lib/recommend'
+const MODEL = 'claude-haiku-4-5-20251001'
+const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 
-const norm = (s) => (s == null ? '' : String(s).trim().toLowerCase())
-
-export default function Recommendations() {
-  const router = useRouter()
-  const [books, setBooks] = useState([])
-  const [clubs, setClubs] = useState([])
-  const [mode, setMode] = useState('personalized') // 'personalized' | 'coldstart'
-  const [ready, setReady] = useState(false)
-
-  useEffect(() => { load() }, [])
-
-  async function load() {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) { setReady(true); return } // logged out → render nothing
-
-    const { data: me } = await supabase
-      .from('members')
-      .select('id, member_interests')
-      .eq('auth_id', session.user.id)
-      .maybeSingle()
-    if (!me) { setReady(true); return }
-
-    // Pull signals + candidate pools in parallel.
-    const [myClubsRes, shelfRes, booksRes, clubsRes] = await Promise.all([
-      supabase.from('club_members').select('club_id, clubs(id, tags)').eq('member_id', me.id),
-      supabase.from('shelves').select('title, author, status').eq('member_id', me.id),
-      supabase.from('books').select('id, title, author, tags, club_id'),
-      supabase.from('clubs').select('id, name, tags, privacy, club_members(count)'),
-    ])
-
-    const myClubRows = myClubsRes.data || []
-    const myClubIds = myClubRows.map((r) => r.club_id)
-    const clubTags = myClubRows.flatMap((r) => (r.clubs?.tags) || [])
-
-    // Tags don't live on the shelf row — derive them from the books pool by title.
-    const allBooks = booksRes.data || []
-    const tagsByTitle = new Map()
-    for (const b of allBooks) {
-      const k = norm(b.title)
-      if (!tagsByTitle.has(k) || (b.tags?.length || 0) > (tagsByTitle.get(k)?.length || 0)) {
-        tagsByTitle.set(k, b.tags || [])
-      }
-    }
-
-    const shelved = (shelfRes.data || []).map((s) => ({
-      title: s.title,
-      author: s.author,
-      status: s.status,
-      tags: tagsByTitle.get(norm(s.title)) || [],
-    }))
-
-    const signals = { interests: me.member_interests || [], clubTags, shelved }
-
-    // Book candidates: dedupe the books table by title, keep the richest-tagged row.
-    const byTitle = new Map()
-    for (const b of allBooks) {
-      const k = norm(b.title)
-      const cur = byTitle.get(k)
-      if (!cur || (b.tags?.length || 0) > (cur.tags?.length || 0)) byTitle.set(k, b)
-    }
-    const bookCandidates = [...byTitle.values()]
-
-    const clubCandidates = (clubsRes.data || []).map((c) => ({
-      ...c,
-      memberCount: c.club_members?.[0]?.count ?? 0,
-    }))
-
-    // Cold-start fallbacks so a brand-new user still sees something.
-    const fallbackClubs = [...clubCandidates].sort((a, b) => b.memberCount - a.memberCount)
-    const fallbackBooks = [...bookCandidates].slice(0, 6)
-
-    const bRec = recommendBooks(signals, { candidates: bookCandidates, limit: 6, fallbackBooks })
-    const cRec = recommendClubs(signals, {
-      candidates: clubCandidates, limit: 4, fallbackClubs, myClubIds, openOnly: true,
-    })
-
-    setBooks(bRec.items || [])
-    setClubs(cRec.items || [])
-    setMode(bRec.mode === 'coldstart' && cRec.mode === 'coldstart' ? 'coldstart' : 'personalized')
-    setReady(true)
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST')
+    return res.status(405).json({ error: 'Method not allowed' })
   }
 
-  if (!ready || (books.length === 0 && clubs.length === 0)) return null
+  const key = process.env.ANTHROPIC_API_KEY
+  if (!key) return res.status(200).json({ books: [], clubs: [], disabled: true })
 
-  const heading = mode === 'coldstart' ? 'Popular right now' : 'Recommended for you'
-  const sub =
-    mode === 'coldstart'
-      ? 'A few places to start.'
-      : 'Picked from your interests, shelves, and clubs.'
+  const { interests = [], books = [], clubs = [] } = req.body || {}
+  if (books.length === 0 && clubs.length === 0) {
+    return res.status(200).json({ books: [], clubs: [] })
+  }
 
-  return (
-    <section style={{ maxWidth: 1180, margin: '0 auto', padding: '8px 24px 44px' }}>
-      <div style={{ marginBottom: 18 }}>
-        <h2 style={{ fontFamily: 'var(--hd)', fontSize: 30, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>
-          {heading}
-        </h2>
-        <p style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', margin: '4px 0 0' }}>{sub}</p>
-      </div>
+  // Compact candidate payload — only what the model needs to reason + write copy.
+  const bookLines = books.map((b) => ({
+    id: b.id, title: b.title, author: b.author, tags: b.tags || [],
+  }))
+  const clubLines = clubs.map((c) => ({
+    id: c.id, name: c.name, tags: c.tags || [],
+  }))
 
-      {books.length > 0 && (
-        <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 8, marginBottom: clubs.length ? 30 : 0 }}>
-          {books.map((b) => (
-            <BookCard key={b.id} book={b} onClick={() => router.push(`/book/${b.id}`)} />
-          ))}
-        </div>
-      )}
+  const system =
+    'You curate book-club recommendations. Respond with ONLY valid JSON, no ' +
+    'markdown, no prose. Never invent books, clubs, ids, or facts. Only use ids ' +
+    'from the input. Each "reason" is one warm sentence, max 14 words, grounded ' +
+    'in the reader\'s interests or the item\'s tags. No spoilers.'
 
-      {clubs.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
-          {clubs.map((c) => (
-            <ClubCard key={c.id} club={c} onClick={() => router.push(`/club/${c.id}`)} />
-          ))}
-        </div>
-      )}
-    </section>
-  )
+  const user =
+    `Reader interests: ${JSON.stringify(interests)}\n` +
+    `Candidate books: ${JSON.stringify(bookLines)}\n` +
+    `Candidate clubs: ${JSON.stringify(clubLines)}\n\n` +
+    'Pick and order the best up to 6 books and up to 4 clubs for this reader. ' +
+    'Return exactly this shape: ' +
+    '{"books":[{"id":"...","reason":"..."}],"clubs":[{"id":"...","reason":"..."}]}'
+
+  try {
+    const r = await fetch(ANTHROPIC_URL, {
+      method: 'POST',
+      headers: {
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 600,
+        system,
+        messages: [{ role: 'user', content: user }],
+      }),
+    })
+
+    if (!r.ok) return res.status(200).json({ books: [], clubs: [] })
+    const data = await r.json()
+
+    const text = (data.content || [])
+      .filter((p) => p.type === 'text')
+      .map((p) => p.text)
+      .join('')
+      .trim()
+
+    const parsed = safeParse(text)
+    if (!parsed) return res.status(200).json({ books: [], clubs: [] })
+
+    // Keep only ids we actually sent — guards against any hallucinated id.
+    const bookIds = new Set(books.map((b) => String(b.id)))
+    const clubIds = new Set(clubs.map((c) => String(c.id)))
+    const clean = (items, allowed) =>
+      (Array.isArray(items) ? items : [])
+        .filter((x) => x && allowed.has(String(x.id)))
+        .map((x) => ({ id: String(x.id), blurb: String(x.reason || '').slice(0, 120) }))
+
+    return res.status(200).json({
+      books: clean(parsed.books, bookIds),
+      clubs: clean(parsed.clubs, clubIds),
+    })
+  } catch (e) {
+    return res.status(200).json({ books: [], clubs: [] })
+  }
 }
 
-function reasonText(why) {
-  if (!why) return null
-  if (why.author) return `Because you read ${why.author}`
-  if (why.tags && why.tags.length) return `Because you're into ${why.tags[0]}`
-  return null
-}
-
-function BookCard({ book, onClick }) {
-  const reason = reasonText(book.why)
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        flex: '0 0 auto', width: 200, textAlign: 'left', cursor: 'pointer',
-        background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14,
-        padding: 16, display: 'flex', flexDirection: 'column', gap: 8,
-      }}
-    >
-      <div style={{ fontFamily: 'var(--hd)', fontSize: 19, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.2 }}>
-        {book.title}
-      </div>
-      <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>{book.author}</div>
-      {book.tags?.[0] && (
-        <span style={{
-          alignSelf: 'flex-start', fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700,
-          letterSpacing: 1, textTransform: 'uppercase', color: 'var(--tc)', background: 'var(--tcD)',
-          borderRadius: 100, padding: '4px 10px',
-        }}>
-          {book.tags[0]}
-        </span>
-      )}
-      {reason && (
-        <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txM)', marginTop: 'auto' }}>{reason}</div>
-      )}
-    </button>
-  )
-}
-
-function ClubCard({ club, onClick }) {
-  const reason = reasonText(club.why)
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        textAlign: 'left', cursor: 'pointer', background: 'var(--sf)', border: '1px solid var(--bd)',
-        borderRadius: 14, padding: 18, display: 'flex', flexDirection: 'column', gap: 8,
-      }}
-    >
-      <div style={{ fontFamily: 'var(--hd)', fontSize: 21, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.15 }}>
-        {club.name}
-      </div>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {(club.tags || []).slice(0, 2).map((t) => (
-          <span key={t} style={{
-            fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase',
-            color: 'var(--sg)', background: 'rgba(94,122,98,0.1)', borderRadius: 100, padding: '4px 10px',
-          }}>
-            {t}
-          </span>
-        ))}
-      </div>
-      <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txM)', marginTop: 'auto' }}>
-        {reason || `${club.memberCount || 0} member${club.memberCount === 1 ? '' : 's'}`}
-      </div>
-    </button>
-  )
+// Tolerate accidental ```json fences or leading/trailing prose.
+function safeParse(text) {
+  if (!text) return null
+  let t = text.replace(/```json/gi, '').replace(/```/g, '').trim()
+  const start = t.indexOf('{')
+  const end = t.lastIndexOf('}')
+  if (start !== -1 && end !== -1) t = t.slice(start, end + 1)
+  try { return JSON.parse(t) } catch { return null }
 }
