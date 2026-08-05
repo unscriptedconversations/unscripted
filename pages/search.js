@@ -13,6 +13,18 @@ function Avatar({ member, size = 32 }) {
   return <div style={{ width: size, height: size, borderRadius: '50%', background: member?.color || '#8B6E52', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.4, fontWeight: 700, fontFamily: 'var(--ui)', color: '#FFF', flexShrink: 0 }}>{initialsFor(member)}</div>
 }
 
+// Author name(s) as links to the author page. stopPropagation so tapping the
+// name doesn't also trigger the row's navigation to the book.
+function AuthorLinks({ author, router }) {
+  if (!author) return null
+  const parts = author.split(',').map(s => s.trim()).filter(Boolean)
+  return parts.map((nm, i) => (
+    <span key={i}>
+      <span onClick={(e) => { e.stopPropagation(); router.push(`/author/${encodeURIComponent(nm)}`) }} style={{ color: 'var(--tc)', cursor: 'pointer' }}>{nm}</span>{i < parts.length - 1 ? ', ' : ''}
+    </span>
+  ))
+}
+
 const FORMAT_LABEL = { essay: 'Essay', reflection: 'Reflection', note: 'Note' }
 const SectionLabel = ({ children }) => (
   <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', margin: '28px 0 12px' }}>{children}</div>
@@ -161,7 +173,7 @@ export default function SearchPage() {
                 <span style={{ fontSize: 22 }}>📖</span>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</div>
-                  <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>{b.author}{b.club ? ` · ${b.club.name}` : ''}</div>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}><AuthorLinks author={b.author} router={router} />{b.club ? ` · ${b.club.name}` : ''}</div>
                 </div>
               </div>
             ))}
@@ -220,7 +232,7 @@ export default function SearchPage() {
                   : <span style={{ fontSize: 22, width: 30, textAlign: 'center' }}>📖</span>}
                 <div style={{ flex: 1 }}>
                   <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</div>
-                  <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>{b.author}{b.year ? ` · ${b.year}` : ''}</div>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}><AuthorLinks author={b.author} router={router} />{b.year ? ` · ${b.year}` : ''}</div>
                 </div>
                 <span style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--txD)', flexShrink: 0 }}>Not on unscripted</span>
               </div>
