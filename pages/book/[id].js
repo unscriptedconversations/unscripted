@@ -15,9 +15,19 @@ export default function BookPage() {
   const [notFound, setNotFound] = useState(false)
   const [currentUser, setCurrentUser] = useState(null)
   const [shelfStatus, setShelfStatus] = useState(null)
+  const [shelfCounts, setShelfCounts] = useState(null)
 
   useEffect(() => { if (id) loadBook() }, [id])
   useEffect(() => { if (book?.title) loadShelf() }, [book])
+  useEffect(() => { if (book?.title) loadShelfCounts() }, [book])
+
+  async function loadShelfCounts() {
+    const { data } = await supabase.from('shelves').select('status').eq('title', book.title)
+    if (!data || !data.length) { setShelfCounts(null); return }
+    const c = { want: 0, reading: 0, read: 0 }
+    for (const r of data) if (c[r.status] != null) c[r.status]++
+    setShelfCounts({ ...c, total: data.length })
+  }
 
   // Open Library work keys look like "OL12345W"; our own ids are UUIDs.
   const isOLKey = typeof id === 'string' && /^OL\d+W$/i.test(id)
@@ -188,6 +198,8 @@ export default function BookPage() {
           </div>
 
           {/* ── BRIDGE (preserved) ───────────────────────────────── */}
+          {shelfCounts && <div style={{ textAlign: 'center', margin: '-28px auto 36px', fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>{shelfCounts.total} reader{shelfCounts.total !== 1 ? 's' : ''} shelved this{shelfCounts.reading > 0 ? ` · ${shelfCounts.reading} reading now` : ''}</div>}
+
           {book.title && <div style={{ background: 'var(--ink)', borderRadius: 14, padding: '20px 24px', marginBottom: 32, display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}
             onClick={() => router.push(`/bridge/book/${encodeURIComponent(book.title)}?author=${encodeURIComponent(book.author || '')}`)}>
             <span style={{ fontSize: 22 }}>↗</span>
