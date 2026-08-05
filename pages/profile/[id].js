@@ -43,6 +43,8 @@ export default function ProfilePage() {
   const [member, setMember] = useState(null)
   const [writings, setWritings] = useState([])
   const [clubs, setClubs] = useState([])
+  const [shelfItems, setShelfItems] = useState([])
+  const [shelfLinks, setShelfLinks] = useState({})
   const [currentUser, setCurrentUser] = useState(null)
   const [following, setFollowing] = useState(false)
   const [followerCount, setFollowerCount] = useState(0)
@@ -79,6 +81,14 @@ export default function ProfilePage() {
     setFollowerCount(count || 0)
     const { count: fc } = await supabase.from('writing_follows').select('id', { count: 'exact', head: true }).eq('follower_member_id', id)
     setFollowingCount(fc || 0)
+    const { data: sh } = await supabase.from('shelves').select('title, author, book_key, status').eq('member_id', id).order('created_at', { ascending: false })
+    setShelfItems(sh || [])
+    const titles = (sh || []).map(s => s.title)
+    if (titles.length) {
+      const { data: bk } = await supabase.from('books').select('id, title').in('title', titles)
+      const map = {}; for (const b of (bk || [])) map[b.title] = b.id
+      setShelfLinks(map)
+    }
   }
 
   async function checkFollowing() {
@@ -192,7 +202,7 @@ export default function ProfilePage() {
         <div style={{ marginBottom: 32 }} />
 
         <div style={{ display: 'flex', borderBottom: '1px solid var(--bd)', marginBottom: 24 }}>
-          {[['writing', 'Writing'], ['clubs', 'Clubs'], ...(isOwner ? [['account', 'Account']] : [])].map(([k, l]) => (
+          {[['writing', 'Writing'], ['clubs', 'Clubs'], ['shelf', 'Shelf'], ...(isOwner ? [['account', 'Account']] : [])].map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: tab === k ? 'var(--ink)' : 'var(--txD)', background: 'none', border: 'none', cursor: 'pointer', padding: '12px 20px 12px 0', position: 'relative' }}>
               {l}{tab === k && <div style={{ position: 'absolute', bottom: -1, left: 0, right: 20, height: 2, background: 'var(--tc)', borderRadius: 2 }} />}
             </button>
@@ -280,6 +290,27 @@ export default function ProfilePage() {
               {isOwner && <button onClick={e => { e.stopPropagation(); togglePin(c.id, !c.pinned) }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, opacity: c.pinned ? 1 : 0.35, flexShrink: 0 }} aria-label={c.pinned ? 'Unpin' : 'Pin'}>📌</button>}
             </div>
           )) : <><div style={{ fontFamily: 'var(--hd)', fontSize: 16, fontStyle: 'italic', color: 'var(--txD)', padding: '24px 0' }}>Not in any clubs yet.</div><div style={{ marginTop: 16 }}><button style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 8, padding: '11px 20px', cursor: 'pointer' }} onClick={() => router.push('/create')}>Start a club</button></div></>}
+        </div>}
+
+        {tab === 'shelf' && <div>
+          {shelfItems.length > 0 ? ['reading', 'want', 'read'].map(st => {
+            const items = shelfItems.filter(s => s.status === st)
+            if (!items.length) return null
+            const label = st === 'reading' ? 'Reading' : st === 'want' ? 'Want to read' : 'Read'
+            return <div key={st} style={{ marginBottom: 24 }}>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 10 }}>{label}</div>
+              {items.map((s, i) => {
+                const href = s.book_key ? `/book/${s.book_key}` : (shelfLinks[s.title] ? `/book/${shelfLinks[s.title]}` : null)
+                return <div key={i} onClick={() => href && router.push(href)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 12, marginBottom: 8, cursor: href ? 'pointer' : 'default' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{s.title}</div>
+                    {s.author && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>{s.author}</div>}
+                  </div>
+                  {href && <span style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--tc)', fontWeight: 600 }}>→</span>}
+                </div>
+              })}
+            </div>
+          }) : <div style={{ fontFamily: 'var(--hd)', fontSize: 16, fontStyle: 'italic', color: 'var(--txD)', padding: '24px 0' }}>{isOwner ? 'Your shelf is empty — add books from any book page.' : 'No books on the shelf yet.'}</div>}
         </div>}
       </div>
     </div>
