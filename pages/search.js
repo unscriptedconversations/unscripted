@@ -63,7 +63,7 @@ export default function SearchPage() {
       supabase.from('clubs').select('id, name, description, privacy, tagline, tags').or(`name.ilike.${like},description.ilike.${like},tagline.ilike.${like},tags.cs.{${term}}`).limit(20),
       supabase.from('books').select('id, title, author, tags, club:clubs(name)').or(`title.ilike.${like},author.ilike.${like},tags.cs.{${term}}`).limit(20),
       supabase.from('writings').select('id, title, content, format, published_at, member_id, tags, author:members(id, first_name, last_name, initials, color)').eq('is_published', true).or(`title.ilike.${like},content.ilike.${like},tags.cs.{${term}}`).limit(20),
-      supabase.from('members').select('id, first_name, last_name, initials, color').or(`first_name.ilike.${like},last_name.ilike.${like}`).limit(12),
+      supabase.from('members').select('id, first_name, last_name, initials, color').or('status.is.null,status.neq.disabled').or(`first_name.ilike.${like},last_name.ilike.${like}`).limit(12),
       supabase.from('bridge_threads').select('*').or(`title.ilike.${like},anchor.ilike.${like}`).limit(12),
     ])
     setClubs(cR.data || [])
