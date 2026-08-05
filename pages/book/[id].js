@@ -13,8 +13,11 @@ export default function BookPage() {
   const [threadCount, setThreadCount] = useState(0)
   const [memberCount, setMemberCount] = useState(0)
   const [notFound, setNotFound] = useState(false)
+  const [currentUser, setCurrentUser] = useState(null)
+  const [shelfStatus, setShelfStatus] = useState(null)
 
   useEffect(() => { if (id) loadBook() }, [id])
+  useEffect(() => { if (book?.title) loadShelf() }, [book])
 
   // Open Library work keys look like "OL12345W"; our own ids are UUIDs.
   const isOLKey = typeof id === 'string' && /^OL\d+W$/i.test(id)
@@ -89,6 +92,38 @@ export default function BookPage() {
     router.push(session ? `/create?${q}` : `/signup?${q}`)
   }
 
+  async function loadShelf() {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) return
+    const { data: m } = await supabase.from('members').select('id').eq('auth_id', session.user.id).maybeSingle()
+    if (!m) return
+    setCurrentUser(m)
+    const { data: s } = await supabase.from('shelves').select('status').eq('member_id', m.id).eq('title', book.title).maybeSingle()
+    setShelfStatus(s?.status || null)
+  }
+
+  // Tapping the active status removes the book from the shelf; otherwise sets/changes it.
+  async function setShelf(status) {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) { router.push('/signup'); return }
+    let member = currentUser
+    if (!member) {
+      const { data: m } = await supabase.from('members').select('id').eq('auth_id', session.user.id).maybeSingle()
+      member = m; setCurrentUser(m)
+    }
+    if (!member) return
+    if (shelfStatus === status) {
+      await supabase.from('shelves').delete().eq('member_id', member.id).eq('title', book.title)
+      setShelfStatus(null)
+    } else {
+      await supabase.from('shelves').upsert(
+        { member_id: member.id, title: book.title, author: book.author || null, book_key: bookKey || (isOLKey ? id : null), status },
+        { onConflict: 'member_id,title' }
+      )
+      setShelfStatus(status)
+    }
+  }
+
   if (notFound) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}><div style={{ textAlign: 'center' }}><div style={{ fontFamily: 'var(--hd)', fontSize: 22, fontStyle: 'italic', color: 'var(--ink)', marginBottom: 12 }}>We couldn't find that book.</div><button className="join-btn" onClick={() => router.push('/')}>Back to Explore</button></div></div>
   if (!book) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontFamily: 'var(--ui)', color: 'var(--txD)' }}>Loading...</div></div>
 
@@ -141,9 +176,15 @@ export default function BookPage() {
           </div>
 
           {/* ── CTAs ─────────────────────────────────────────────── */}
-          <div style={{ display: 'flex', gap: 12, maxWidth: 420, margin: '0 auto 40px' }}>
+          <div style={{ display: 'flex', gap: 12, maxWidth: 420, margin: '0 auto 14px' }}>
             {hasClubs && <button style={primaryBtn} onClick={() => document.getElementById('clubs-reading')?.scrollIntoView({ behavior: 'smooth' })}>Join a club reading this</button>}
             <button style={hasClubs ? secondaryBtn : primaryBtn} onClick={() => startClub()}>Start a club for this book</button>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, maxWidth: 420, margin: '0 auto 40px', justifyContent: 'center' }}>
+            {[['want', 'Want to read'], ['reading', 'Reading'], ['read', 'Read']].map(([k, l]) => (
+              <button key={k} onClick={() => setShelf(k)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: shelfStatus === k ? '#FFF' : 'var(--tc)', background: shelfStatus === k ? 'var(--tc)' : 'var(--tcD)', border: 'none', borderRadius: 100, padding: '9px 16px', cursor: 'pointer' }}>{l}</button>
+            ))}
           </div>
 
           {/* ── BRIDGE (preserved) ───────────────────────────────── */}
