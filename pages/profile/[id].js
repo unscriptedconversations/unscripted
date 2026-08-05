@@ -46,6 +46,10 @@ export default function ProfilePage() {
   const [currentUser, setCurrentUser] = useState(null)
   const [following, setFollowing] = useState(false)
   const [followerCount, setFollowerCount] = useState(0)
+  const [followingCount, setFollowingCount] = useState(0)
+  const [listModal, setListModal] = useState(null)   // 'followers' | 'following'
+  const [listMembers, setListMembers] = useState([])
+  const [listLoading, setListLoading] = useState(false)
   const [tab, setTab] = useState('writing')
   const [showColorPicker, setShowColorPicker] = useState(false)
   const [accountModal, setAccountModal] = useState(null)   // 'disable' | 'delete'
@@ -73,6 +77,8 @@ export default function ProfilePage() {
     if (cm) setClubs(cm.filter(x => x.club).map(x => ({ ...x.club, pinned: x.pinned })).sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)))
     const { count } = await supabase.from('writing_follows').select('id', { count: 'exact', head: true }).eq('writer_member_id', id)
     setFollowerCount(count || 0)
+    const { count: fc } = await supabase.from('writing_follows').select('id', { count: 'exact', head: true }).eq('follower_member_id', id)
+    setFollowingCount(fc || 0)
   }
 
   async function checkFollowing() {
@@ -91,6 +97,20 @@ export default function ProfilePage() {
       setFollowerCount(c => c + 1)
     }
     setFollowing(!following)
+  }
+
+  // Load the follower or following list for this profile (reads writing_follows both directions).
+  async function openList(kind) {
+    setListModal(kind); setListMembers([]); setListLoading(true)
+    const col = kind === 'followers' ? 'writer_member_id' : 'follower_member_id'
+    const other = kind === 'followers' ? 'follower_member_id' : 'writer_member_id'
+    const { data: rows } = await supabase.from('writing_follows').select(other).eq(col, id)
+    const ids = [...new Set((rows || []).map(r => r[other]).filter(Boolean))]
+    if (ids.length) {
+      const { data: ms } = await supabase.from('members').select('id, first_name, last_name, initials, color').in('id', ids)
+      setListMembers(ms || [])
+    }
+    setListLoading(false)
   }
 
   const CHURN_REASONS = [
@@ -156,7 +176,7 @@ export default function ProfilePage() {
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontFamily: 'var(--hd)', fontSize: 28, fontWeight: 600, color: 'var(--ink)' }}>{member.first_name} {member.last_name}</div>
-            <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', marginTop: 4 }}>{followerCount} follower{followerCount !== 1 ? 's' : ''}{clubs.length > 0 ? ` · ${clubs.length} club${clubs.length !== 1 ? 's' : ''}` : ''}</div>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', marginTop: 4 }}><span onClick={() => openList('followers')} style={{ cursor: 'pointer' }}><b style={{ color: 'var(--ink)' }}>{followerCount}</b> follower{followerCount !== 1 ? 's' : ''}</span>{' · '}<span onClick={() => openList('following')} style={{ cursor: 'pointer' }}><b style={{ color: 'var(--ink)' }}>{followingCount}</b> following</span>{clubs.length > 0 ? ` · ${clubs.length} club${clubs.length !== 1 ? 's' : ''}` : ''}</div>
           </div>
           {!isOwner && <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: following ? 'var(--sg)' : '#FFF', background: following ? 'rgba(94,122,98,0.1)' : 'var(--ink)', border: 'none', borderRadius: 8, padding: '10px 20px', cursor: 'pointer' }} onClick={toggleFollow}>{following ? 'Following' : 'Follow'}</button>}
         </div>
@@ -206,6 +226,20 @@ export default function ProfilePage() {
             <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: '#A0603E', marginBottom: 6 }}>Delete account</div>
             <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', lineHeight: 1.6, marginBottom: 14 }}>Permanently removes your profile, writing, and posts. This can\u2019t be undone.</div>
             <button onClick={() => setAccountModal('delete')} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: '#A0603E', border: 'none', borderRadius: 8, padding: '10px 18px', cursor: 'pointer' }}>Delete my account</button>
+          </div>
+        </div>}
+
+        {listModal && <div onClick={() => setListModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(26,31,46,0.5)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--sf)', borderRadius: 18, padding: '24px 22px', maxWidth: 420, width: '100%', maxHeight: '70vh', overflowY: 'auto' }}>
+            <div style={{ fontFamily: 'var(--hd)', fontSize: 20, fontWeight: 600, color: 'var(--ink)', marginBottom: 16, textTransform: 'capitalize' }}>{listModal}</div>
+            {listLoading ? <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>Loading…</div>
+              : listMembers.length === 0 ? <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>{listModal === 'followers' ? 'No followers yet.' : 'Not following anyone yet.'}</div>
+              : listMembers.map(m => (
+                <div key={m.id} onClick={() => { setListModal(null); router.push(`/profile/${m.id}`) }} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 4px', cursor: 'pointer' }}>
+                  <div style={{ width: 38, height: 38, borderRadius: '50%', background: m.color || '#8B6E52', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: '#FFF', flexShrink: 0 }}>{m.initials || (((m.first_name || '')[0] || '') + ((m.last_name || '')[0] || ''))}</div>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>{m.first_name} {m.last_name}</div>
+                </div>
+              ))}
           </div>
         </div>}
 
