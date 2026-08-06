@@ -11,6 +11,7 @@
 // we'd never be holding another club's message in state anyway.
 
 import { useState, useEffect, useRef } from 'react'
+import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import { notifyMentions } from '../lib/notify'
 
@@ -23,6 +24,7 @@ const fmtTime = (ts) => {
 const labelFor = (m) => (m?.first_name || m?.initials || '—')
 
 export default function ClubChat({ clubId }) {
+  const router = useRouter()
   const [me, setMe] = useState(null)          // { id, first_name, initials, color }
   const [isHost, setIsHost] = useState(false)
   const [messages, setMessages] = useState([])
@@ -115,6 +117,34 @@ export default function ClubChat({ clubId }) {
     )
   }
 
+  // Highlight "@name" as a link to the member's profile when it matches a club
+  // member. Same matching rules as the club page's renderContent (first name or
+  // full name, underscores tolerated). Uses the roster we loaded on mount.
+  function renderContent(text) {
+    if (!text) return text
+    const roster = rosterRef.current || []
+    return String(text).split(/(@[A-Za-z0-9_]+)/g).map((part, i) => {
+      if (part[0] !== '@') return part
+      const h = part.slice(1).toLowerCase()
+      const hClean = h.replace(/_/g, '')
+      const m = roster.find((mm) => {
+        const fn = (mm.first_name || '').toLowerCase()
+        const full = ((mm.first_name || '') + (mm.last_name || '')).toLowerCase()
+        return h === fn || full === hClean || full === h
+      })
+      if (!m) return part
+      return (
+        <span
+          key={i}
+          onClick={(e) => { e.stopPropagation(); router.push(`/profile/${m.id}`) }}
+          style={{ color: 'var(--tc)', fontWeight: 600, cursor: 'pointer' }}
+        >
+          @{m.first_name}
+        </span>
+      )
+    })
+  }
+
   async function send() {
     const body = text.trim()
     if (!body || sending || !me) return
@@ -204,7 +234,7 @@ export default function ClubChat({ clubId }) {
                     )}
                   </div>
                   <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--ink)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.4 }}>
-                    {m.content}
+                    {renderContent(m.content)}
                   </div>
                 </div>
               </div>
