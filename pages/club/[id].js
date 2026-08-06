@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase'
 import Logo from '../../components/Logo'
 import Tag from '../../components/Tag'
 import NotificationBell from '../../components/NotificationBell'
+import ClubChat from '../../components/ClubChat'
 import { notifyMentions, createNotification, notifyClubPost } from '../../lib/notify'
 
 function timeAgo(date) {
@@ -604,7 +605,7 @@ export default function ClubPage() {
             ['feed', 'Feed'],
             ['disc', 'Bookshelf'],
             ['members', 'Members'],
-            ...(isMember || isHost ? [['settings', 'Settings']] : []),
+            ...(isMember || isHost ? [['chat', 'Chat'], ['settings', 'Settings']] : []),
           ].map(([k, l]) =>
             <button key={k} className={`nav-btn ${view === k ? 'active' : ''}`} style={{ padding: '14px 24px' }} onClick={() => { setView(k); setActiveThread(null); setProfileMember(null) }}>{l}</button>
           )}
@@ -683,6 +684,12 @@ export default function ClubPage() {
 
             {discMode === 'open' && activeOpenThread && <div className="open-card" onClick={() => openThread(activeOpenThread)}><div className="open-card-row"><div className="open-icon">💬</div><div className="open-info"><div className="open-title">{activeOpenThread.title}</div><div className="open-meta">All chapters · No spoiler walls</div></div><div className="open-enter">Enter</div></div><div className="open-desc">The full conversation — no chapter boundaries. Spoilers welcome.</div></div>}
           </>}
+        </div>}
+
+        {/* CHAT */}
+        {view === 'chat' && (isMember || isHost) && <div style={{ paddingBottom: 80 }}>
+          <div className="section-title" style={{ marginBottom: 20 }}>Chat</div>
+          <ClubChat clubId={id} />
         </div>}
 
         {/* THREAD */}
