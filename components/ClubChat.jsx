@@ -12,6 +12,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { notifyMentions } from '../lib/notify'
 
 const fmtTime = (ts) => {
   try {
@@ -30,6 +31,7 @@ export default function ClubChat({ clubId }) {
   const [sending, setSending] = useState(false)
 
   const memberCache = useRef(new Map())       // member_id -> { first_name, initials, color }
+  const rosterRef = useRef([])                // [{ id, first_name, last_name }] for @mention resolution
   const scrollRef = useRef(null)
   const meRef = useRef(null)
 
@@ -55,6 +57,13 @@ export default function ClubChat({ clubId }) {
         .eq('member_id', member.id)
         .maybeSingle()
       setIsHost(membership?.role === 'host')
+
+      // Roster for @mention → member-id resolution (same shape notifyMentions uses elsewhere).
+      const { data: roster } = await supabase
+        .from('club_members')
+        .select('members(id, first_name, last_name)')
+        .eq('club_id', clubId)
+      rosterRef.current = (roster || []).map((r) => r.members).filter(Boolean)
 
       const { data: history } = await supabase
         .from('club_messages')
@@ -122,6 +131,14 @@ export default function ClubChat({ clubId }) {
     setMessages((prev) =>
       prev.some((m) => m.id === data.id) ? prev : [...prev, { ...data, members: me }]
     )
+    // Notify anyone @mentioned — same helper the feed and threads use. Fire-and-forget.
+    notifyMentions({
+      text: body,
+      members: rosterRef.current,
+      actorId: me.id,
+      link: `/club/${clubId}`,
+      preview: body.slice(0, 60),
+    })
   }
 
   async function remove(msg) {
