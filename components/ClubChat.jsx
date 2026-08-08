@@ -1,4 +1,5 @@
- // components/ClubChat.jsx
+
+// components/ClubChat.jsx
 // Real-time casual side-channel for a club. Self-contained: give it a clubId and
 // it resolves its own session/member/host, loads full history (no join-date gate),
 // subscribes to Supabase Realtime, and handles posting + deleting.
@@ -95,6 +96,7 @@ export default function ClubChat({ clubId }) {
       for (const r of rows) if (r.members) memberCache.current.set(r.member_id, r.members)
       setMessages(rows)
       setReady(true)
+      markChatRead() // opening the tab clears the unread count
 
       channel = supabase
         .channel(`club_messages:${clubId}`)
@@ -133,6 +135,21 @@ export default function ClubChat({ clubId }) {
     setMessages((prev) =>
       prev.some((m) => m.id === row.id) ? prev : [...prev, { ...row, members: member }]
     )
+    // A message arrived while the tab is open — keep our read marker current so
+    // it doesn't count as unread the next time the badge is computed.
+    markChatRead()
+  }
+
+  // Stamp this member's chat_last_read_at = now(). Uses meRef so it's safe to
+  // call from the mount flow (before `me` state settles) and the realtime handler.
+  async function markChatRead() {
+    const meNow = meRef.current
+    if (!meNow) return
+    await supabase
+      .from('club_members')
+      .update({ chat_last_read_at: new Date().toISOString() })
+      .eq('club_id', clubId)
+      .eq('member_id', meNow.id)
   }
 
   // Highlight "@name" as a link to the member's profile when it matches a club
