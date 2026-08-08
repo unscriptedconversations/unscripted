@@ -1,4 +1,4 @@
-// components/ClubChat.jsx
+ // components/ClubChat.jsx
 // Real-time casual side-channel for a club. Self-contained: give it a clubId and
 // it resolves its own session/member/host, loads full history (no join-date gate),
 // subscribes to Supabase Realtime, and handles posting + deleting.
@@ -23,6 +23,22 @@ const fmtTime = (ts) => {
 
 const labelFor = (m) => (m?.first_name || m?.initials || '—')
 
+// Small avatar used in the welcome/empty state.
+function Avatar({ member, size = 34 }) {
+  const initials = member?.initials || (member?.first_name || '—')[0]
+  return (
+    <div style={{
+      flex: '0 0 auto', width: size, height: size, borderRadius: '50%',
+      background: member?.color || 'var(--tc)', color: '#fff',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontFamily: 'var(--ui)', fontSize: size * 0.36, fontWeight: 700,
+      border: '2px solid var(--sf)',
+    }}>
+      {initials}
+    </div>
+  )
+}
+
 export default function ClubChat({ clubId }) {
   const router = useRouter()
   const [me, setMe] = useState(null)          // { id, first_name, initials, color }
@@ -31,6 +47,7 @@ export default function ClubChat({ clubId }) {
   const [text, setText] = useState('')
   const [ready, setReady] = useState(false)
   const [sending, setSending] = useState(false)
+  const [chatHidden, setChatHidden] = useState(false)
 
   const memberCache = useRef(new Map())       // member_id -> { first_name, initials, color }
   const rosterRef = useRef([])                // [{ id, first_name, last_name }] for @mention resolution
@@ -54,16 +71,17 @@ export default function ClubChat({ clubId }) {
 
       const { data: membership } = await supabase
         .from('club_members')
-        .select('role')
+        .select('role, chat_hidden')
         .eq('club_id', clubId)
         .eq('member_id', member.id)
         .maybeSingle()
       setIsHost(membership?.role === 'host')
+      setChatHidden(!!membership?.chat_hidden)
 
       // Roster for @mention → member-id resolution (same shape notifyMentions uses elsewhere).
       const { data: roster } = await supabase
         .from('club_members')
-        .select('members(id, first_name, last_name)')
+        .select('members(id, first_name, last_name, initials, color)')
         .eq('club_id', clubId)
       rosterRef.current = (roster || []).map((r) => r.members).filter(Boolean)
 
@@ -145,6 +163,29 @@ export default function ClubChat({ clubId }) {
     })
   }
 
+  async function leaveChat() {
+    if (!me) return
+    if (!window.confirm('Leave this chat? You can rejoin anytime — you stay a club member.')) return
+    setChatHidden(true) // optimistic
+    const { error } = await supabase
+      .from('club_members')
+      .update({ chat_hidden: true })
+      .eq('club_id', clubId)
+      .eq('member_id', me.id)
+    if (error) setChatHidden(false)
+  }
+
+  async function rejoinChat() {
+    if (!me) return
+    setChatHidden(false) // optimistic
+    const { error } = await supabase
+      .from('club_members')
+      .update({ chat_hidden: false })
+      .eq('club_id', clubId)
+      .eq('member_id', me.id)
+    if (error) setChatHidden(true)
+  }
+
   async function send() {
     const body = text.trim()
     if (!body || sending || !me) return
@@ -191,14 +232,38 @@ export default function ClubChat({ clubId }) {
   if (!me) {
     return <div style={{ padding: 40, textAlign: 'center', color: 'var(--txM)', fontFamily: 'var(--ui)' }}>Sign in to join the chat.</div>
   }
+  if (chatHidden) {
+    return (
+      <div style={{ padding: '48px 24px', textAlign: 'center' }}>
+        <div style={{ fontFamily: 'var(--hd)', fontSize: 20, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>You've left this chat</div>
+        <p style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txM)', marginBottom: 22 }}>You're still a club member — rejoin whenever you like.</p>
+        <button onClick={rejoinChat} style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 600, color: '#fff', background: 'var(--tc)', border: 'none', borderRadius: 12, padding: '10px 22px', cursor: 'pointer' }}>
+          Rejoin chat
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '60vh', minHeight: 380 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: 6 }}>
+        <span role="button" onClick={leaveChat} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--txM)', cursor: 'pointer' }}>
+          Leave chat
+        </span>
+      </div>
       <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '8px 4px' }}>
         {messages.length === 0 ? (
-          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <p style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txM)', textAlign: 'center' }}>
-              No messages yet — start the conversation.
+          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 24px', textAlign: 'center' }}>
+            {rosterRef.current.length > 0 && (
+              <div style={{ display: 'flex', marginBottom: 18 }}>
+                {rosterRef.current.slice(0, 5).map((mm, i) => (
+                  <div key={mm.id} style={{ marginLeft: i ? -10 : 0 }}><Avatar member={mm} size={44} /></div>
+                ))}
+              </div>
+            )}
+            <div style={{ fontFamily: 'var(--hd)', fontSize: 22, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>Welcome to the chat</div>
+            <p style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txM)', maxWidth: 360, lineHeight: 1.5 }}>
+              This is the beginning of your club's chat. Say hello, react to what you're reading, or drop a half-formed thought.
             </p>
           </div>
         ) : (
