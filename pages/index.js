@@ -85,7 +85,11 @@ export default function Landing() {
     setQ(val)
     if (val.length < 2) { setSR(null); setOlBooks([]); setWHits([]); setOlLoading(false); return }
     const lv = val.toLowerCase()
-    const clubHits = clubs.filter(c => c.name.toLowerCase().includes(lv))
+    const clubHits = clubs.filter(c =>
+      c.name.toLowerCase().includes(lv) ||
+      (c.description || '').toLowerCase().includes(lv) ||
+      (c.tags || []).some(t => t.toLowerCase().includes(lv))
+    )
     const bookHits = books.filter(b =>
       b.title.toLowerCase().includes(lv) ||
       (b.author || '').toLowerCase().includes(lv) ||
@@ -132,7 +136,7 @@ export default function Landing() {
         .from('writings')
         .select('id, title, format, author:members(first_name, last_name)')
         .eq('is_published', true)
-        .or(`title.ilike.${like},content.ilike.${like}`)
+        .or(`title.ilike.${like},content.ilike.${like},tags.cs.{${val}}`)
         .limit(4)
       setWHits(data || [])
     }, 350)
@@ -228,7 +232,7 @@ export default function Landing() {
             {sr && <div style={{ position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 400, overflowY: 'auto' }}>
               {(sr.clubs.length > 0 || sr.books.length > 0 || olBooks.length > 0) && (
                 <div style={{ display: 'flex', gap: 6, padding: '12px 16px', borderBottom: '1px solid var(--bd)', position: 'sticky', top: 0, background: 'var(--sf)', zIndex: 1 }}>
-                  {[['all', 'All', sr.clubs.length + sr.books.length + olBooks.length], ['clubs', 'Clubs', sr.clubs.length], ['books', 'Books', sr.books.length + olBooks.length]].map(([k, label, n]) => (
+                  {[['all', 'All', sr.clubs.length + sr.books.length + olBooks.length + wHits.length], ['clubs', 'Clubs', sr.clubs.length], ['books', 'Books', sr.books.length + olBooks.length], ['writings', 'Writing', wHits.length]].map(([k, label, n]) => (
                     <button key={k} onClick={() => setSrTab(k)}
                       style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: srTab === k ? 'var(--tc)' : 'var(--txD)', background: srTab === k ? 'var(--tcD)' : 'transparent', border: '1px solid ' + (srTab === k ? 'var(--tc)' : 'var(--bd)'), borderRadius: 100, padding: '6px 14px', cursor: 'pointer' }}>
                       {label} {n}
@@ -236,7 +240,7 @@ export default function Landing() {
                   ))}
                 </div>
               )}
-              {sr.clubs.length === 0 && sr.books.length === 0 && olBooks.length === 0 && !olLoading && (
+              {sr.clubs.length === 0 && sr.books.length === 0 && olBooks.length === 0 && wHits.length === 0 && !olLoading && (
                 <div style={{ padding: 24, fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', textAlign: 'center' }}>No results for "{q}"</div>
               )}
               {(srTab === 'all' || srTab === 'clubs') && sr.clubs.length > 0 && <div>
@@ -287,7 +291,7 @@ export default function Landing() {
                   </div>
                 ))}
               </div>}
-              {(srTab === 'all') && wHits.length > 0 && <div>
+              {(srTab === 'all' || srTab === 'writings') && wHits.length > 0 && <div>
                 <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Writing</div>
                 {wHits.map(w => (
                   <div key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }} onClick={() => router.push(`/writing/${w.id}`)}>
