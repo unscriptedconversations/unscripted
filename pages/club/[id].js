@@ -171,6 +171,9 @@ export default function ClubPage() {
   const [memberProgress, setMemberProgress] = useState({})
   const [showEditProfile, setShowEditProfile] = useState(false)
   const [editForm, setEditForm] = useState({ fav_book: '', fav_book_author: '', one_word: '', fav_cartoon: '' })
+  const [chatUnread, setChatUnread] = useState(0)
+  const viewRef = useRef('feed')
+  useEffect(() => { viewRef.current = view }, [view])
 
   useEffect(() => {
     // Load session from Supabase Auth (replaces localStorage)
@@ -221,6 +224,47 @@ export default function ClubPage() {
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.id])
+
+  // Chat unread badge — initial count: messages from others since my last read.
+  // Skipped if I've left the chat or the Chat tab is already open. chat_last_read_at
+  // comes from the membership loadClub already fetched.
+  useEffect(() => {
+    if (!currentUser || !id) return
+    if (viewRef.current === 'chat') return
+    const cm = memberships.find(m => m.member_id === currentUser.id)
+    if (!cm || cm.chat_hidden) { setChatUnread(0); return }
+    let q = supabase.from('club_messages').select('id', { count: 'exact', head: true })
+      .eq('club_id', id).neq('member_id', currentUser.id)
+    if (cm.chat_last_read_at) q = q.gt('created_at', cm.chat_last_read_at)
+    q.then(({ count }) => setChatUnread(count || 0))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, id, memberships.length])
+
+  // Chat unread badge — live: bump when a message arrives from someone else while
+  // the Chat tab isn't open. viewRef avoids a stale-closure read of `view`.
+  useEffect(() => {
+    if (!currentUser || !id) return
+    const cm = memberships.find(m => m.member_id === currentUser.id)
+    if (!cm || cm.chat_hidden) return
+    const channel = supabase
+      .channel(`club_chat_badge:${id}`)
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'club_messages', filter: `club_id=eq.${id}` },
+        (payload) => {
+          const row = payload.new
+          if (!row || row.member_id === currentUser.id) return
+          if (viewRef.current === 'chat') return
+          setChatUnread(n => n + 1)
+        })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, id, memberships.length])
+
+  // Opening the Chat tab clears the badge (ClubChat stamps chat_last_read_at on mount).
+  useEffect(() => {
+    if (view === 'chat') setChatUnread(0)
+  }, [view])
 
   async function loadClub() {
     const { data: c } = await supabase.from('clubs').select('*').eq('id', id).single()
@@ -606,7 +650,10 @@ export default function ClubPage() {
             ['members', 'Members'],
             ...(isMember || isHost ? [['chat', 'Chat'], ['settings', 'Settings']] : []),
           ].map(([k, l]) =>
-            <button key={k} className={`nav-btn ${view === k ? 'active' : ''}`} style={{ padding: '14px 24px' }} onClick={() => { setView(k); setActiveThread(null); setProfileMember(null) }}>{l}</button>
+            <button key={k} className={`nav-btn ${view === k ? 'active' : ''}`} style={{ padding: '14px 24px' }} onClick={() => { setView(k); setActiveThread(null); setProfileMember(null) }}>
+              {l}
+              {k === 'chat' && view !== 'chat' && chatUnread > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18, marginLeft: 7, padding: '0 5px', borderRadius: 100, background: 'var(--tc)', color: '#FFF', fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, lineHeight: 1, verticalAlign: 'middle' }}>{chatUnread > 9 ? '9+' : chatUnread}</span>}
+            </button>
           )}
         </div>
 
