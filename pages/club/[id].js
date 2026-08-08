@@ -177,13 +177,13 @@ export default function ClubPage() {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) return
       const { data: member } = await supabase
-        .from('members').select('*').eq('id', session.user.id).single()
+        .from('members').select('*').eq('auth_id', session.user.id).maybeSingle()
       if (member) setCurrentUser(member)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session) {
         const { data: member } = await supabase
-          .from('members').select('*').eq('id', session.user.id).single()
+          .from('members').select('*').eq('auth_id', session.user.id).maybeSingle()
         if (member) setCurrentUser(member)
       } else {
         setCurrentUser(null)
@@ -417,7 +417,6 @@ export default function ClubPage() {
       one_word: currentUser.one_word || '',
       fav_cartoon: currentUser.fav_cartoon || '',
     })
-    setShowFigPicker(false)
     setShowEditProfile(true)
   }
 
@@ -434,7 +433,7 @@ export default function ClubPage() {
     setCurrentUser(prev => ({ ...prev, ...upd }))
     setProfileMember(prev => (prev && prev.id === currentUser.id) ? { ...prev, ...upd } : prev)
     setMembers(prev => prev.map(m => m.id === currentUser.id ? { ...m, ...upd } : m))
-    setShowEditProfile(false); setShowFigPicker(false)
+    setShowEditProfile(false)
   }
 
   // Turn "@Name" into a clickable link when it matches a club member.
