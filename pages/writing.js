@@ -3,6 +3,7 @@ import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
 import NotificationBell from '../components/NotificationBell'
+import { BRIDGE_ENABLED } from '../lib/flags'
 
 function initialsFor(m) {
   if (m?.initials) return m.initials
@@ -67,7 +68,7 @@ export default function WritingFeed() {
           <div className="brand" onClick={() => router.push('/')}><Logo /></div>
           <div className="nav-links">
             <button className="nav-btn" onClick={() => router.push('/')}>Explore</button>
-            <button className="nav-btn" onClick={() => router.push('/bridge')}>Bridge</button>
+            {BRIDGE_ENABLED && <button className="nav-btn" onClick={() => router.push('/bridge')}>Bridge</button>}
             <button className="nav-btn active">Writing</button>
             {currentUser ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
