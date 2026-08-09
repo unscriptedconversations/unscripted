@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
+import { BRIDGE_ENABLED } from '../lib/flags'
 
 function initialsFor(m) {
   if (m?.initials) return m.initials
@@ -35,6 +36,7 @@ export default function SearchPage() {
   const [q, setQ] = useState('')
   const [clubs, setClubs] = useState([])
   const [books, setBooks] = useState([])
+  const [magazines, setMagazines] = useState([])
   const [writings, setWritings] = useState([])
   const [authors, setAuthors] = useState([])
   const [bridges, setBridges] = useState([])
@@ -59,15 +61,19 @@ export default function SearchPage() {
     const lv = term.toLowerCase()
     const like = `%${term}%`
 
-    const [cR, bR, wR, aR, brR] = await Promise.all([
+    const [cR, bR, mR, wR, aR, brR] = await Promise.all([
       supabase.from('clubs').select('id, name, description, privacy, tagline, tags').or(`name.ilike.${like},description.ilike.${like},tagline.ilike.${like},tags.cs.{${term}}`).limit(20),
       supabase.from('books').select('id, title, author, tags, club:clubs(name)').or(`title.ilike.${like},author.ilike.${like},tags.cs.{${term}}`).limit(20),
+      supabase.from('magazines').select('id, title, publisher, description, tags, cover_url, website, founded').or(`title.ilike.${like},publisher.ilike.${like},description.ilike.${like},tags.cs.{${term}}`).limit(20),
       supabase.from('writings').select('id, title, content, format, published_at, member_id, tags, author:members(id, first_name, last_name, initials, color)').eq('is_published', true).or(`title.ilike.${like},content.ilike.${like},tags.cs.{${term}}`).limit(20),
       supabase.from('members').select('id, first_name, last_name, initials, color').or('status.is.null,status.neq.disabled').or(`first_name.ilike.${like},last_name.ilike.${like}`).limit(12),
-      supabase.from('bridge_threads').select('*').or(`title.ilike.${like},anchor.ilike.${like}`).limit(12),
+      BRIDGE_ENABLED
+        ? supabase.from('bridge_threads').select('*').or(`title.ilike.${like},anchor.ilike.${like}`).limit(12)
+        : Promise.resolve({ data: [] }),
     ])
     setClubs(cR.data || [])
     setBooks(bR.data || [])
+    setMagazines(mR.data || [])
     setWritings(wR.data || [])
     setAuthors(aR.data || [])
 
@@ -107,7 +113,7 @@ export default function SearchPage() {
   function submit(e) { e?.preventDefault?.(); runSearch() }
 
   const show = t => tab === 'all' || tab === t
-  const totalOnSite = clubs.length + books.length + writings.length + authors.length + bridges.length + olBooks.length
+  const totalOnSite = clubs.length + books.length + magazines.length + writings.length + authors.length + bridges.length + olBooks.length
   const preview = t => (t || '').length > 160 ? t.slice(0, 160) + '…' : t
 
   const rowStyle = { display: 'flex', alignItems: 'center', gap: 14, padding: '16px 20px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 12, marginBottom: 10, cursor: 'pointer' }
@@ -130,7 +136,7 @@ export default function SearchPage() {
               autoFocus
               className="field-input"
               style={{ marginBottom: 0, paddingLeft: 48, borderRadius: 14, fontSize: 16 }}
-              placeholder="Search books, clubs, writing, a theme…"
+              placeholder="Search books, magazines, clubs, writing, a theme…"
               value={q}
               onChange={e => setQ(e.target.value)}
             />
@@ -139,7 +145,7 @@ export default function SearchPage() {
 
           {/* Type filter */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '16px 0 8px' }}>
-            {[['all', 'All'], ['books', 'Books'], ['clubs', 'Clubs'], ['writings', 'Writing'], ['bridges', 'Bridge'], ['authors', 'Authors']].map(([k, l]) => (
+            {[['all', 'All'], ['books', 'Books'], ['magazines', 'Magazines'], ['clubs', 'Clubs'], ['writings', 'Writing'], ...(BRIDGE_ENABLED ? [['bridges', 'Bridge']] : []), ['authors', 'Authors']].map(([k, l]) => (
               <button key={k} onClick={() => setTab(k)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: tab === k ? 'var(--tc)' : 'var(--txD)', background: tab === k ? 'var(--tcD)' : 'transparent', border: '1px solid ' + (tab === k ? 'var(--tc)' : 'var(--bd)'), borderRadius: 100, padding: '7px 16px', cursor: 'pointer' }}>{l}</button>
             ))}
           </div>
@@ -179,6 +185,24 @@ export default function SearchPage() {
             ))}
           </div>}
 
+          {/* MAGAZINES */}
+          {show('magazines') && magazines.length > 0 && <div>
+            <SectionLabel>Magazines</SectionLabel>
+            {magazines.map(m => (
+              <div key={m.id} style={{ ...rowStyle, cursor: m.website ? 'pointer' : 'default' }} onClick={() => { if (m.website) window.open(m.website, '_blank', 'noopener,noreferrer') }}>
+                {m.cover_url
+                  ? <img src={m.cover_url} alt="" style={{ width: 30, height: 42, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }} />
+                  : <span style={{ fontSize: 22, width: 30, textAlign: 'center' }}>📰</span>}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>{m.title}</div>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>{[m.publisher, m.founded].filter(Boolean).join(' · ')}</div>
+                  {(m.tags || []).length > 0 && <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>{m.tags.slice(0, 3).map(t => <span key={t} style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 600, color: 'var(--sg)', background: 'rgba(94,122,98,0.1)', borderRadius: 100, padding: '2px 8px' }}>{t}</span>)}</div>}
+                </div>
+                {m.website && <span style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--txD)', flexShrink: 0 }}>Visit ↗</span>}
+              </div>
+            ))}
+          </div>}
+
           {/* WRITINGS */}
           {show('writings') && writings.length > 0 && <div>
             <SectionLabel>Writing</SectionLabel>
@@ -208,7 +232,7 @@ export default function SearchPage() {
           </div>}
 
           {/* BRIDGE CONVERSATIONS */}
-          {show('bridges') && bridges.length > 0 && <div>
+          {BRIDGE_ENABLED && show('bridges') && bridges.length > 0 && <div>
             <SectionLabel>Conversations</SectionLabel>
             {bridges.map(t => (
               <div key={t.id} style={rowStyle} onClick={() => t.kind === 'book' ? router.push(`/bridge/book/${encodeURIComponent(t.title)}${t.subtitle ? `?author=${encodeURIComponent(t.subtitle)}` : ''}`) : router.push(`/bridge/theme/${encodeURIComponent(t.title || t.anchor)}`)}>
@@ -241,7 +265,7 @@ export default function SearchPage() {
 
           {!ran && (
             <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', padding: '40px 0', textAlign: 'center', lineHeight: 1.7 }}>
-              Search across books, clubs, writing, and people.<br />Try a title, an author, or a theme like “grief” or “identity.”
+              Search across books, magazines, clubs, writing, and people.<br />Try a title, an author, or a theme like “grief” or “identity.”
             </div>
           )}
         </div>
