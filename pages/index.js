@@ -8,6 +8,7 @@ import { BRIDGE_ENABLED } from '../lib/flags'
 
 let olTimer
 let wTimer
+let mTimer
 
 export default function Landing() {
   const router = useRouter()
@@ -19,6 +20,7 @@ export default function Landing() {
   const [activeMap, setActiveMap] = useState({})
   const [olBooks, setOlBooks] = useState([])
   const [wHits, setWHits] = useState([])
+  const [mHits, setMHits] = useState([])
   const [olLoading, setOlLoading] = useState(false)
   const [recentPosts, setRecentPosts] = useState([])
   const [myMemberships, setMyMemberships] = useState(null)
@@ -84,7 +86,7 @@ export default function Landing() {
 
   function doSearch(val) {
     setQ(val)
-    if (val.length < 2) { setSR(null); setOlBooks([]); setWHits([]); setOlLoading(false); return }
+    if (val.length < 2) { setSR(null); setOlBooks([]); setWHits([]); setMHits([]); setOlLoading(false); return }
     const lv = val.toLowerCase()
     const clubHits = clubs.filter(c =>
       c.name.toLowerCase().includes(lv) ||
@@ -100,6 +102,7 @@ export default function Landing() {
     setSrTab('all')
     searchOpenLibrary(val)
     searchWritings(val)
+    searchMagazines(val)
   }
 
   // Live catalog search (any published book, not just ones on unscripted).
@@ -140,6 +143,19 @@ export default function Landing() {
         .or(`title.ilike.${like},content.ilike.${like},tags.cs.{${val}}`)
         .limit(4)
       setWHits(data || [])
+    }, 350)
+  }
+
+  function searchMagazines(val) {
+    clearTimeout(mTimer)
+    mTimer = setTimeout(async () => {
+      const like = `%${val}%`
+      const { data } = await supabase
+        .from('magazines')
+        .select('id, title, publisher, website')
+        .or(`title.ilike.${like},publisher.ilike.${like},description.ilike.${like},tags.cs.{${val}}`)
+        .limit(4)
+      setMHits(data || [])
     }, 350)
   }
 
@@ -233,7 +249,7 @@ export default function Landing() {
             {sr && <div style={{ position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 400, overflowY: 'auto' }}>
               {(sr.clubs.length > 0 || sr.books.length > 0 || olBooks.length > 0) && (
                 <div style={{ display: 'flex', gap: 6, padding: '12px 16px', borderBottom: '1px solid var(--bd)', position: 'sticky', top: 0, background: 'var(--sf)', zIndex: 1 }}>
-                  {[['all', 'All', sr.clubs.length + sr.books.length + olBooks.length + wHits.length], ['clubs', 'Clubs', sr.clubs.length], ['books', 'Books', sr.books.length + olBooks.length], ['writings', 'Writing', wHits.length]].map(([k, label, n]) => (
+                  {[['all', 'All', sr.clubs.length + sr.books.length + olBooks.length + mHits.length + wHits.length], ['clubs', 'Clubs', sr.clubs.length], ['books', 'Books', sr.books.length + olBooks.length], ['magazines', 'Magazines', mHits.length], ['writings', 'Writing', wHits.length]].map(([k, label, n]) => (
                     <button key={k} onClick={() => setSrTab(k)}
                       style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: srTab === k ? 'var(--tc)' : 'var(--txD)', background: srTab === k ? 'var(--tcD)' : 'transparent', border: '1px solid ' + (srTab === k ? 'var(--tc)' : 'var(--bd)'), borderRadius: 100, padding: '6px 14px', cursor: 'pointer' }}>
                       {label} {n}
@@ -241,7 +257,7 @@ export default function Landing() {
                   ))}
                 </div>
               )}
-              {sr.clubs.length === 0 && sr.books.length === 0 && olBooks.length === 0 && wHits.length === 0 && !olLoading && (
+              {sr.clubs.length === 0 && sr.books.length === 0 && olBooks.length === 0 && mHits.length === 0 && wHits.length === 0 && !olLoading && (
                 <div style={{ padding: 24, fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', textAlign: 'center' }}>No results for "{q}"</div>
               )}
               {(srTab === 'all' || srTab === 'clubs') && sr.clubs.length > 0 && <div>
@@ -289,6 +305,19 @@ export default function Landing() {
                       <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.year ? ` · ${b.year}` : ''}</div>
                     </div>
                     <span style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--txD)', flexShrink: 0 }}>Not on unscripted</span>
+                  </div>
+                ))}
+              </div>}
+              {(srTab === 'all' || srTab === 'magazines') && mHits.length > 0 && <div>
+                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Magazines</div>
+                {mHits.map(m => (
+                  <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: m.website ? 'pointer' : 'default', borderBottom: '1px solid var(--bd)' }} onClick={() => { if (m.website) window.open(m.website, '_blank', 'noopener,noreferrer') }}>
+                    <span style={{ fontSize: 18 }}>📰</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>{m.title}</div>
+                      <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{m.publisher || ''}</div>
+                    </div>
+                    {m.website && <span style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--txD)', flexShrink: 0 }}>Visit ↗</span>}
                   </div>
                 ))}
               </div>}
