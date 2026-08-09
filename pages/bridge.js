@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
+import { BRIDGE_ENABLED } from '../lib/flags'
 
 function timeAgo(date) {
   if (!date) return ''
@@ -18,7 +19,10 @@ export default function BridgeIndex() {
   const [tab, setTab] = useState('all')
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    if (!BRIDGE_ENABLED) { router.replace('/'); return }
+    load()
+  }, [])
 
   async function load() {
     const { data: ts } = await supabase.from('bridge_threads').select('*')
@@ -49,6 +53,8 @@ export default function BridgeIndex() {
     if (t.kind === 'book') router.push(`/bridge/book/${encodeURIComponent(t.title)}${t.subtitle ? `?author=${encodeURIComponent(t.subtitle)}` : ''}`)
     else router.push(`/bridge/theme/${encodeURIComponent(t.title || t.anchor)}`)
   }
+
+  if (!BRIDGE_ENABLED) return null
 
   return (
     <div style={{ minHeight: '100vh' }}>
