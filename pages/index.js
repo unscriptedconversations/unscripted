@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
 import NotificationBell from '../components/NotificationBell'
 import Recommendations from '../components/Recommendations'
+import { BRIDGE_ENABLED } from '../lib/flags'
 
 let olTimer
 let wTimer
@@ -193,7 +194,7 @@ export default function Landing() {
           <div className="nav-links">
             <button className="nav-btn active">Explore</button>
             <button className="nav-btn" onClick={() => router.push('/writing')}>Writing</button>
-            <button className="nav-btn" onClick={() => router.push('/bridge')}>Bridge</button>
+            {BRIDGE_ENABLED && <button className="nav-btn" onClick={() => router.push('/bridge')}>Bridge</button>}
             {currentUser ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                 <button className="nav-btn" onClick={() => router.push('/create')}>+ Club</button>
