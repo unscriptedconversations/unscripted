@@ -3,6 +3,7 @@ import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
 import { BRIDGE_ENABLED } from '../lib/flags'
+import { magazineCover } from '../lib/magazineCover'
 
 function initialsFor(m) {
   if (m?.initials) return m.initials
@@ -190,9 +191,7 @@ export default function SearchPage() {
             <SectionLabel>Magazines</SectionLabel>
             {magazines.map(m => (
               <div key={m.id} style={{ ...rowStyle, cursor: m.website ? 'pointer' : 'default' }} onClick={() => { if (m.website) window.open(m.website, '_blank', 'noopener,noreferrer') }}>
-                {m.cover_url
-                  ? <img src={m.cover_url} alt="" style={{ width: 30, height: 42, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }} />
-                  : <span style={{ fontSize: 22, width: 30, textAlign: 'center' }}>📰</span>}
+                <img src={m.cover_url || magazineCover(m.title)} alt="" style={{ width: 30, height: 42, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }} />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>{m.title}</div>
                   <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>{[m.publisher, m.founded].filter(Boolean).join(' · ')}</div>
