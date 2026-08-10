@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
 import { BRIDGE_ENABLED } from '../lib/flags'
 import { magazineCover } from '../lib/magazineCover'
+import { olSearch } from '../lib/olSearch'
 
 function initialsFor(m) {
   if (m?.initials) return m.initials
@@ -96,18 +97,10 @@ export default function SearchPage() {
     }
     setLoading(false)
 
-    // Wider catalog (Open Library), deduped against on-platform titles
+    // Wider catalog (Open Library) via shared lib — cache is warmed across the
+    // homepage and /search. Submit-driven, so no debounce/sequence guard needed.
     setOlLoading(true)
-    try {
-      const r = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(term)}&limit=12&fields=key,title,author_name,cover_i,first_publish_year`)
-      const d = await r.json()
-      const onSite = new Set((bR.data || []).map(b => b.title.toLowerCase()))
-      setOlBooks((d.docs || [])
-        .filter(doc => doc.title && doc.key)
-        .map(doc => ({ key: doc.key.replace('/works/', ''), title: doc.title, author: (doc.author_name || []).join(', '), cover: doc.cover_i, year: doc.first_publish_year }))
-        .filter(b => !onSite.has(b.title.toLowerCase()))
-        .slice(0, 8))
-    } catch { setOlBooks([]) }
+    setOlBooks(await olSearch(term, { excludeTitles: (bR.data || []).map(b => b.title) }))
     setOlLoading(false)
   }
 
