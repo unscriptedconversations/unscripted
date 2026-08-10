@@ -426,63 +426,6 @@ export default function Landing() {
           )}
         </section>}
 
-        {/* ALL CLUBS + SIDEBAR ADS */}
-        <div className="clubs-layout">
-          <div>
-            <div className="section-title" style={{ marginBottom: 20 }}>All Clubs</div>
-            {loading && (
-              <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', padding: '24px 0' }}>Loading clubs…</div>
-            )}
-            {!loading && clubs.length === 0 && (
-              <div style={{ background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 16, padding: '48px 32px', textAlign: 'center' }}>
-                <div style={{ fontSize: 40, marginBottom: 16 }}>📚</div>
-                <div style={{ fontFamily: 'var(--hd)', fontSize: 22, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>
-                  No clubs yet.
-                </div>
-                <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.6, marginBottom: 24 }}>
-                  Be the first to start a reading community on unscripted.
-                </div>
-                <button
-                  onClick={() => router.push(currentUser ? '/create' : '/signup')}
-                  style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 10, padding: '12px 24px', cursor: 'pointer' }}
-                >
-                  Start the first club
-                </button>
-              </div>
-            )}
-            {!loading && clubs.map(c => {
-              const cb = getClubCurrentBook(c)
-              return (
-                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '18px 20px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 12, marginBottom: 10, cursor: 'pointer' }}
-                  onClick={() => router.push(`/club/${c.id}`)}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>{c.name}</div>
-                    <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{cb ? cb.title + ' · ' : ''}{getClubMemberCount(c)} members</div>
-                    {activeBadge(c)}
-                  </div>
-                  {unreadBadge(c)}
-                  <span className="tag" style={{ background: c.privacy === 'open' ? 'rgba(94,122,98,0.1)' : 'var(--tcD)', color: c.privacy === 'open' ? 'var(--sg)' : 'var(--tc)' }}>{c.privacy}</span>
-                </div>
-              )
-            })}
-          </div>
-          <div className="clubs-sidebar">
-            {[
-              { t: 'Strand Bookstore', d: '18 miles of books since 1927.', url: 'https://strandbooks.com' },
-              { t: 'Audible', d: 'Listen to your club\'s current read. First month free.', url: 'https://audible.com' },
-            ].map((ad, i) => (
-              <a key={i} href={ad.url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', color: 'inherit' }}>
-                <div style={{ background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 14, padding: 24, marginBottom: 16, cursor: 'pointer' }}>
-                  <div style={{ fontFamily: 'var(--ui)', fontSize: 8, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 10 }}>Sponsored</div>
-                  <div style={{ fontFamily: 'var(--hd)', fontSize: 18, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>{ad.t}</div>
-                  <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', lineHeight: 1.5, marginBottom: 12 }}>{ad.d}</div>
-                  <span style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--tc)' }}>Visit ↗</span>
-                </div>
-              </a>
-            ))}
-          </div>
-        </div>
-
         {/* FOOTER */}
         <footer style={{ borderTop: '1px solid var(--bd)', padding: '32px 0 48px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontFamily: 'var(--cs)', fontSize: 20, color: 'var(--ink)' }}>unscripted</div>
