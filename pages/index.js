@@ -6,28 +6,16 @@ import NotificationBell from '../components/NotificationBell'
 import Recommendations from '../components/Recommendations'
 import { BRIDGE_ENABLED } from '../lib/flags'
 import { magazineCover } from '../lib/magazineCover'
+import { olSearch, olPeek } from '../lib/olSearch'
 
 let olTimer
 let wTimer
 let mTimer
 
-// Session cache for Open Library results, keyed by normalized query — a cache
-// hit skips BOTH the 350ms debounce and the network round-trip (OL is the slow
-// part). olSeq orders async responses so a slow older request can't overwrite
-// newer results. Both are module-scoped (like the timers) so they persist for
-// the tab's lifetime.
-const OL_CACHE = new Map()
-const OL_CACHE_MAX = 100
+// olSeq orders async OL responses so a slow older request can't overwrite newer
+// results. The query cache itself now lives in lib/olSearch.js (shared with
+// /search). Module-scoped like the timers, so it persists for the tab.
 let olSeq = 0
-
-function olCacheSet(k, v) {
-  while (OL_CACHE.size >= OL_CACHE_MAX) {
-    const oldest = OL_CACHE.keys().next().value
-    if (oldest === undefined) break
-    OL_CACHE.delete(oldest)
-  }
-  OL_CACHE.set(k, v)
-}
 
 export default function Landing() {
   const router = useRouter()
@@ -125,43 +113,27 @@ export default function Landing() {
   }
 
   // Live catalog search (any published book, not just ones on unscripted).
-  // Debounced so we don't fire a request per keystroke. Cache hits render
-  // instantly (no debounce, no network); olSeq guards against stale overwrites.
+  // Debounced so we don't fire a request per keystroke. Cache hits (via olPeek)
+  // render instantly — no debounce, no network. olSeq guards stale overwrites.
   function searchOpenLibrary(val) {
     const seq = ++olSeq
-    const keyq = val.trim().toLowerCase()
     clearTimeout(olTimer)
 
     // Cache hit → instant. Skip the debounce and the network entirely.
-    if (OL_CACHE.has(keyq)) {
-      setOlBooks(OL_CACHE.get(keyq))
+    const warm = olPeek(val, { excludeTitles: books.map(b => b.title) })
+    if (warm) {
+      setOlBooks(warm)
       setOlLoading(false)
       return
     }
 
     setOlLoading(true)
     olTimer = setTimeout(async () => {
-      try {
-        const r = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(val)}&limit=12&fields=key,title,author_name,cover_i,first_publish_year`)
-        const d = await r.json()
-        const onSite = new Set(books.map(b => b.title.toLowerCase()))
-        const hits = (d.docs || [])
-          .filter(doc => doc.title && doc.key)
-          .map(doc => ({
-            key: doc.key.replace('/works/', ''),
-            title: doc.title,
-            author: (doc.author_name || []).join(', '),
-            cover: doc.cover_i,
-            year: doc.first_publish_year,
-          }))
-          .filter(b => !onSite.has(b.title.toLowerCase()))
-          .slice(0, 8)
-        olCacheSet(keyq, hits)
-        if (seq === olSeq) setOlBooks(hits)
-      } catch {
-        if (seq === olSeq) setOlBooks([])
+      const hits = await olSearch(val, { excludeTitles: books.map(b => b.title) })
+      if (seq === olSeq) {
+        setOlBooks(hits)
+        setOlLoading(false)
       }
-      if (seq === olSeq) setOlLoading(false)
     }, 350)
   }
 
