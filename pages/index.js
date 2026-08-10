@@ -11,6 +11,24 @@ let olTimer
 let wTimer
 let mTimer
 
+// Session cache for Open Library results, keyed by normalized query — a cache
+// hit skips BOTH the 350ms debounce and the network round-trip (OL is the slow
+// part). olSeq orders async responses so a slow older request can't overwrite
+// newer results. Both are module-scoped (like the timers) so they persist for
+// the tab's lifetime.
+const OL_CACHE = new Map()
+const OL_CACHE_MAX = 100
+let olSeq = 0
+
+function olCacheSet(k, v) {
+  while (OL_CACHE.size >= OL_CACHE_MAX) {
+    const oldest = OL_CACHE.keys().next().value
+    if (oldest === undefined) break
+    OL_CACHE.delete(oldest)
+  }
+  OL_CACHE.set(k, v)
+}
+
 export default function Landing() {
   const router = useRouter()
   const [clubs, setClubs] = useState([])
@@ -107,9 +125,20 @@ export default function Landing() {
   }
 
   // Live catalog search (any published book, not just ones on unscripted).
-  // Debounced so we don't fire a request per keystroke.
+  // Debounced so we don't fire a request per keystroke. Cache hits render
+  // instantly (no debounce, no network); olSeq guards against stale overwrites.
   function searchOpenLibrary(val) {
+    const seq = ++olSeq
+    const keyq = val.trim().toLowerCase()
     clearTimeout(olTimer)
+
+    // Cache hit → instant. Skip the debounce and the network entirely.
+    if (OL_CACHE.has(keyq)) {
+      setOlBooks(OL_CACHE.get(keyq))
+      setOlLoading(false)
+      return
+    }
+
     setOlLoading(true)
     olTimer = setTimeout(async () => {
       try {
@@ -127,9 +156,12 @@ export default function Landing() {
           }))
           .filter(b => !onSite.has(b.title.toLowerCase()))
           .slice(0, 8)
-        setOlBooks(hits)
-      } catch { setOlBooks([]) }
-      setOlLoading(false)
+        olCacheSet(keyq, hits)
+        if (seq === olSeq) setOlBooks(hits)
+      } catch {
+        if (seq === olSeq) setOlBooks([])
+      }
+      if (seq === olSeq) setOlLoading(false)
     }, 350)
   }
 
