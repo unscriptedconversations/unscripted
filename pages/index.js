@@ -5,6 +5,7 @@ import Logo from '../components/Logo'
 import NotificationBell from '../components/NotificationBell'
 import Recommendations from '../components/Recommendations'
 import { BRIDGE_ENABLED } from '../lib/flags'
+import { magazineCover } from '../lib/magazineCover'
 
 let olTimer
 let wTimer
@@ -152,7 +153,7 @@ export default function Landing() {
       const like = `%${val}%`
       const { data } = await supabase
         .from('magazines')
-        .select('id, title, publisher, website')
+        .select('id, title, publisher, website, cover_url')
         .or(`title.ilike.${like},publisher.ilike.${like},description.ilike.${like},tags.cs.{${val}}`)
         .limit(4)
       setMHits(data || [])
@@ -312,7 +313,7 @@ export default function Landing() {
                 <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Magazines</div>
                 {mHits.map(m => (
                   <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: m.website ? 'pointer' : 'default', borderBottom: '1px solid var(--bd)' }} onClick={() => { if (m.website) window.open(m.website, '_blank', 'noopener,noreferrer') }}>
-                    <span style={{ fontSize: 18 }}>📰</span>
+                    <img src={m.cover_url || magazineCover(m.title)} alt="" style={{ width: 30, height: 42, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }} />
                     <div style={{ flex: 1 }}>
                       <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>{m.title}</div>
                       <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{m.publisher || ''}</div>
