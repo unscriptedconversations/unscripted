@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
+import ManualBookAdd from '../components/ManualBookAdd'
 
 export default function CreateClub() {
   const router = useRouter()
@@ -17,6 +18,10 @@ export default function CreateClub() {
   const [noCh, setNoCh] = useState(false)
   const [bkQ, setBkQ] = useState('')
   const [bkR, setBkR] = useState([])
+  const [bookIsbn, setBookIsbn] = useState(null)
+  const [bookKey, setBookKey] = useState(null)
+  const [bookSource, setBookSource] = useState('openlibrary')
+  const [showIsbn, setShowIsbn] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
   const [intentAuthor, setIntentAuthor] = useState('') // arrived via "Start a club for this author"
@@ -63,6 +68,7 @@ export default function CreateClub() {
 
   function pickBook(b) {
     setBookTitle(b.title); setBookAuthor(b.author); setBkQ(b.title); setBkR([])
+    setBookIsbn(null); setBookKey(null); setBookSource('openlibrary')
   }
 
   async function create() {
@@ -88,6 +94,7 @@ export default function CreateClub() {
         title: bookTitle.trim(), author: bookAuthor.trim(),
         total_chapters: chapters, current_chapter: 0,
         status: 'current', display_order: 1, club_id: club.id,
+        isbn: bookIsbn, book_key: bookKey, source: bookSource, added_by: currentUser.id,
       }).select().single()
 
       if (book && chapters > 0) {
@@ -191,6 +198,17 @@ export default function CreateClub() {
               ))}
             </div>}
           </div>
+
+          <button type="button" onClick={() => setShowIsbn(v => !v)} style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--tc)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', marginBottom: 16 }}>
+            {showIsbn ? 'Hide ISBN entry' : 'Can’t find it? Add by ISBN'}
+          </button>
+          {showIsbn && <div style={{ marginBottom: 16 }}>
+            <ManualBookAdd onResolve={b => {
+              setBookTitle(b.title); setBookAuthor(b.author); setBkQ(b.title); setBkR([])
+              setBookIsbn(b.isbn); setBookKey(b.book_key); setBookSource(b.source)
+              setShowIsbn(false)
+            }} />
+          </div>}
 
           {bookTitle.trim() && <div style={{ marginBottom: 28 }}>
             <input style={{ ...fi, marginBottom: 12 }} value={bookAuthor} onChange={e => setBookAuthor(e.target.value)} placeholder="Author" />
