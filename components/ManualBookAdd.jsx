@@ -1,3 +1,4 @@
+
 import { useState } from 'react'
 import { olLookupIsbn } from '../lib/olSearch'
 
@@ -29,13 +30,17 @@ export default function ManualBookAdd({ onResolve }) {
   const [author, setAuthor] = useState('')
   const [cover, setCover] = useState(null)
   const [bookKey, setBookKey] = useState(null)
+  const [error, setError] = useState('')
 
   const cleaned = cleanIsbn(isbn)
   const isbnValid = cleaned.length === 10 || cleaned.length === 13
   const canUse = isbnValid && title.trim().length > 0
 
   async function lookup() {
-    if (!isbnValid || phase === 'looking') return
+    if (phase === 'looking') return
+    if (cleaned.length === 0) { setError('Enter an ISBN to look up.'); return }
+    if (!isbnValid) { setError('That doesn’t look like a valid ISBN — it should be 10 or 13 digits.'); return }
+    setError('')
     setPhase('looking')
     const book = await olLookupIsbn(cleaned)
     if (book) {
@@ -72,7 +77,7 @@ export default function ManualBookAdd({ onResolve }) {
         <input
           style={input}
           value={isbn}
-          onChange={e => { setIsbn(e.target.value); if (phase !== 'idle') setPhase('idle') }}
+          onChange={e => { setIsbn(e.target.value); if (phase !== 'idle') setPhase('idle'); if (error) setError('') }}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); lookup() } }}
           placeholder="978… or 10-digit ISBN"
           inputMode="numeric"
@@ -81,12 +86,18 @@ export default function ManualBookAdd({ onResolve }) {
         <button
           type="button"
           onClick={lookup}
-          disabled={!isbnValid || phase === 'looking'}
-          style={{ ...ghost, whiteSpace: 'nowrap', opacity: (!isbnValid || phase === 'looking') ? 0.5 : 1 }}
+          disabled={phase === 'looking'}
+          style={{ ...ghost, whiteSpace: 'nowrap', opacity: phase === 'looking' ? 0.5 : 1 }}
         >
           {phase === 'looking' ? 'Looking…' : 'Look up'}
         </button>
       </div>
+
+      {error && (
+        <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: '#C0392B', marginTop: 8 }}>
+          {error}
+        </div>
+      )}
 
       {phase === 'manual' && (
         <div style={{ ...note, marginTop: 12 }}>
