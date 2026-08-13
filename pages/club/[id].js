@@ -6,6 +6,7 @@ import Tag from '../../components/Tag'
 import NotificationBell from '../../components/NotificationBell'
 import ClubChat from '../../components/ClubChat'
 import { notifyMentions, createNotification, notifyClubPost } from '../../lib/notify'
+import ManualBookAdd from '../../components/ManualBookAdd'
 
 function timeAgo(date) {
   const s = Math.floor((Date.now() - new Date(date)) / 1000)
@@ -151,10 +152,11 @@ export default function ClubPage() {
   const [replyText, setReplyText] = useState('')
   const [expandedReplies, setExpandedReplies] = useState({})
   const [showAddBook, setShowAddBook] = useState(false)
+  const [showIsbn, setShowIsbn] = useState(false)
   const [bkQ, setBkQ] = useState('')
   const [bkR, setBkR] = useState([])
   const [bkL, setBkL] = useState(false)
-  const [newBook, setNewBook] = useState({ title: '', author: '', chapters: '', noCh: false })
+  const [newBook, setNewBook] = useState({ title: '', author: '', chapters: '', noCh: false, isbn: null, book_key: null, source: 'openlibrary' })
   const timer = useRef(null)
 
   // Settings form state
@@ -381,7 +383,7 @@ export default function ClubPage() {
     if (!newBook.title) return
     await supabase.from('books').update({ status: 'completed' }).eq('club_id', id).eq('status', 'current')
     const chapters = newBook.noCh ? 0 : parseInt(newBook.chapters) || 0
-    const { data: book } = await supabase.from('books').insert({ title: newBook.title, author: newBook.author, total_chapters: chapters, current_chapter: 0, status: 'current', display_order: books.length + 1, club_id: id }).select().single()
+    const { data: book } = await supabase.from('books').insert({ title: newBook.title, author: newBook.author, total_chapters: chapters, current_chapter: 0, status: 'current', display_order: books.length + 1, club_id: id, isbn: newBook.isbn, book_key: newBook.book_key, source: newBook.source, added_by: currentUser.id }).select().single()
     if (book && chapters > 0) {
       const ins = Array.from({ length: chapters }, (_, i) => ({ book_id: book.id, chapter_number: i + 1, title: `Chapter ${i + 1}`, is_active: true }))
       ins.push({ book_id: book.id, chapter_number: 0, title: `Open Discussion: ${newBook.title}`, is_active: true })
@@ -389,7 +391,7 @@ export default function ClubPage() {
     } else if (book) {
       await supabase.from('threads').insert({ book_id: book.id, chapter_number: 0, title: `Open Discussion: ${newBook.title}`, is_active: true })
     }
-    setShowAddBook(false); setNewBook({ title: '', author: '', chapters: '', noCh: false }); setBkQ(''); setBkR([]); loadClub()
+    setShowAddBook(false); setNewBook({ title: '', author: '', chapters: '', noCh: false, isbn: null, book_key: null, source: 'openlibrary' }); setBkQ(''); setBkR([]); setShowIsbn(false); loadClub()
   }
 
   async function setBookChapter(bookId, ch) {
@@ -534,12 +536,21 @@ export default function ClubPage() {
             <input className="field-input" style={{ marginBottom: 0 }} placeholder="Start typing a title..." value={bkQ} onChange={e => searchBook(e.target.value)} />
             {(bkR.length > 0 || bkL) && <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 12, boxShadow: '0 12px 32px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 280, overflowY: 'auto', marginTop: 4 }}>
               {bkL && <div style={{ padding: '16px 20px', fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>Searching...</div>}
-              {bkR.map((b, i) => <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }} onClick={() => { setNewBook(d => ({ ...d, title: b.title, author: b.author })); setBkQ(''); setBkR([]) }}>
+              {bkR.map((b, i) => <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }} onClick={() => { setNewBook(d => ({ ...d, title: b.title, author: b.author, isbn: null, book_key: null, source: 'openlibrary' })); setBkQ(''); setBkR([]) }}>
                 {b.cover ? <img src={b.cover} style={{ width: 32, height: 44, borderRadius: 4, objectFit: 'cover' }} alt="" /> : <span style={{ fontSize: 20 }}>📖</span>}
                 <div><div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>{b.title}</div><div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.year ? ` · ${b.year}` : ''}</div></div>
               </div>)}
             </div>}
           </div>
+          <button type="button" onClick={() => setShowIsbn(v => !v)} style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--tc)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', marginBottom: 20 }}>
+            {showIsbn ? 'Hide ISBN entry' : 'Can’t find it? Add by ISBN'}
+          </button>
+          {showIsbn && <div style={{ marginBottom: 24 }}>
+            <ManualBookAdd onResolve={b => {
+              setNewBook(d => ({ ...d, title: b.title, author: b.author, isbn: b.isbn, book_key: b.book_key, source: b.source }))
+              setBkQ(''); setBkR([]); setShowIsbn(false)
+            }} />
+          </div>}
           {newBook.title && <div style={{ background: 'var(--sf2)', borderRadius: 12, padding: '16px 20px', marginBottom: 24 }}>
             <div style={{ fontFamily: 'var(--hd)', fontSize: 18, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{newBook.title}</div>
             <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', marginBottom: 12 }}>{newBook.author}</div>
