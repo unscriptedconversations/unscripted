@@ -7,6 +7,7 @@ import Recommendations from '../components/Recommendations'
 import { BRIDGE_ENABLED } from '../lib/flags'
 import { magazineCover } from '../lib/magazineCover'
 import { olSearch, olPeek } from '../lib/olSearch'
+import { normalizeTag } from '../lib/tags'
 
 let olTimer
 let wTimer
@@ -95,6 +96,7 @@ export default function Landing() {
     setQ(val)
     if (val.length < 2) { setSR(null); setOlBooks([]); setWHits([]); setMHits([]); setOlLoading(false); return }
     const lv = val.toLowerCase()
+    const nlv = normalizeTag(val)
     const clubHits = clubs.filter(c =>
       c.name.toLowerCase().includes(lv) ||
       (c.description || '').toLowerCase().includes(lv) ||
@@ -103,7 +105,7 @@ export default function Landing() {
     const bookHits = books.filter(b =>
       b.title.toLowerCase().includes(lv) ||
       (b.author || '').toLowerCase().includes(lv) ||
-      (b.tags || []).some(t => t.toLowerCase().includes(lv))
+      (nlv && (b.tags || []).some(t => normalizeTag(t).includes(nlv)))
     )
     setSR({ clubs: clubHits, books: bookHits })
     setSrTab('all')
