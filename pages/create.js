@@ -3,6 +3,7 @@ import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
 import ManualBookAdd from '../components/ManualBookAdd'
+import { normalizeTags } from '../lib/tags'
 
 export default function CreateClub() {
   const router = useRouter()
@@ -19,6 +20,7 @@ export default function CreateClub() {
   const [bkQ, setBkQ] = useState('')
   const [bkR, setBkR] = useState([])
   const [bookIsbn, setBookIsbn] = useState(null)
+  const [bookTags, setBookTags] = useState([])
   const [bookKey, setBookKey] = useState(null)
   const [bookSource, setBookSource] = useState('openlibrary')
   const [showIsbn, setShowIsbn] = useState(false)
@@ -68,7 +70,7 @@ export default function CreateClub() {
 
   function pickBook(b) {
     setBookTitle(b.title); setBookAuthor(b.author); setBkQ(b.title); setBkR([])
-    setBookIsbn(null); setBookKey(null); setBookSource('openlibrary')
+    setBookIsbn(null); setBookKey(null); setBookSource('openlibrary'); setBookTags([])
   }
 
   async function create() {
@@ -95,6 +97,7 @@ export default function CreateClub() {
         total_chapters: chapters, current_chapter: 0,
         status: 'current', display_order: 1, club_id: club.id,
         isbn: bookIsbn, book_key: bookKey, source: bookSource, added_by: currentUser.id,
+        tags: bookTags, tags_norm: normalizeTags(bookTags),
       }).select().single()
 
       if (book && chapters > 0) {
@@ -205,7 +208,7 @@ export default function CreateClub() {
           {showIsbn && <div style={{ marginBottom: 16 }}>
             <ManualBookAdd onResolve={b => {
               setBookTitle(b.title); setBookAuthor(b.author); setBkQ(b.title); setBkR([])
-              setBookIsbn(b.isbn); setBookKey(b.book_key); setBookSource(b.source)
+              setBookIsbn(b.isbn); setBookKey(b.book_key); setBookSource(b.source); setBookTags(b.tags || [])
               setShowIsbn(false)
             }} />
           </div>}
