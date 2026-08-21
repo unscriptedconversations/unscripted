@@ -5,6 +5,7 @@ import Logo from '../components/Logo'
 import { BRIDGE_ENABLED } from '../lib/flags'
 import { magazineCover } from '../lib/magazineCover'
 import { olSearch } from '../lib/olSearch'
+import { normalizeTag } from '../lib/tags'
 
 function initialsFor(m) {
   if (m?.initials) return m.initials
@@ -62,10 +63,16 @@ export default function SearchPage() {
     setLoading(true); setRan(true)
     const lv = term.toLowerCase()
     const like = `%${term}%`
+    // Book tag match uses tags_norm with a normalized term. Guard empty (a
+    // normalized term of '' would make cs.{} match every row).
+    const nterm = normalizeTag(term)
+    const booksOr = nterm
+      ? `title.ilike.${like},author.ilike.${like},tags_norm.cs.{${nterm}}`
+      : `title.ilike.${like},author.ilike.${like}`
 
     const [cR, bR, mR, wR, aR, brR] = await Promise.all([
       supabase.from('clubs').select('id, name, description, privacy, tagline, tags').or(`name.ilike.${like},description.ilike.${like},tagline.ilike.${like},tags.cs.{${term}}`).limit(20),
-      supabase.from('books').select('id, title, author, tags, club:clubs(name)').or(`title.ilike.${like},author.ilike.${like},tags.cs.{${term}}`).limit(20),
+      supabase.from('books').select('id, title, author, tags, club:clubs(name)').or(booksOr).limit(20),
       supabase.from('magazines').select('id, title, publisher, description, tags, cover_url, website, founded').or(`title.ilike.${like},publisher.ilike.${like},description.ilike.${like},tags.cs.{${term}}`).limit(20),
       supabase.from('writings').select('id, title, content, format, published_at, member_id, tags, author:members(id, first_name, last_name, initials, color)').eq('is_published', true).or(`title.ilike.${like},content.ilike.${like},tags.cs.{${term}}`).limit(20),
       supabase.from('members').select('id, first_name, last_name, initials, color').or('status.is.null,status.neq.disabled').or(`first_name.ilike.${like},last_name.ilike.${like}`).limit(12),
