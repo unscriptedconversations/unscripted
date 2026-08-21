@@ -30,6 +30,7 @@ export default function ManualBookAdd({ onResolve }) {
   const [author, setAuthor] = useState('')
   const [cover, setCover] = useState(null)
   const [bookKey, setBookKey] = useState(null)
+  const [tags, setTags] = useState([])
   const [error, setError] = useState('')
 
   const cleaned = cleanIsbn(isbn)
@@ -48,12 +49,14 @@ export default function ManualBookAdd({ onResolve }) {
       setAuthor(book.author || '')
       setCover(book.cover || null)
       setBookKey(book.book_key || book.key || null)
+      setTags(book.subjects || [])
       setPhase('found')
     } else {
       setTitle('')
       setAuthor('')
       setCover(null)
       setBookKey(null)
+      setTags([])
       setPhase('manual')
     }
   }
@@ -66,6 +69,7 @@ export default function ManualBookAdd({ onResolve }) {
       isbn: cleaned,
       book_key: bookKey,
       cover: cover || null,
+      tags: tags,
       source: 'user_isbn',
     })
   }
