@@ -13,6 +13,7 @@ export default function BookPage() {
   const [threadCount, setThreadCount] = useState(0)
   const [memberCount, setMemberCount] = useState(0)
   const [notFound, setNotFound] = useState(false)
+  const [showWritePrompt, setShowWritePrompt] = useState(false)
   const [currentUser, setCurrentUser] = useState(null)
   const [shelfStatus, setShelfStatus] = useState(null)
   const [shelfCounts, setShelfCounts] = useState(null)
@@ -125,12 +126,14 @@ export default function BookPage() {
     if (shelfStatus === status) {
       await supabase.from('shelves').delete().eq('member_id', member.id).eq('title', book.title)
       setShelfStatus(null)
+      setShowWritePrompt(false)
     } else {
       await supabase.from('shelves').upsert(
         { member_id: member.id, title: book.title, author: book.author || null, book_key: bookKey || (isOLKey ? id : null), status },
         { onConflict: 'member_id,title' }
       )
       setShelfStatus(status)
+      setShowWritePrompt(status === 'read')
     }
   }
 
@@ -196,6 +199,21 @@ export default function BookPage() {
               <button key={k} onClick={() => setShelf(k)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: shelfStatus === k ? '#FFF' : 'var(--tc)', background: shelfStatus === k ? 'var(--tc)' : 'var(--tcD)', border: 'none', borderRadius: 100, padding: '9px 16px', cursor: 'pointer' }}>{l}</button>
             ))}
           </div>
+
+          {showWritePrompt && (
+            <div style={{ maxWidth: 460, margin: '0 auto 32px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '16px 18px', display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, color: 'var(--ink)', marginBottom: 3 }}>
+                  You finished <span style={{ fontStyle: 'italic' }}>{book.title}</span>.
+                </div>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 12.5, color: 'var(--txD)', lineHeight: 1.5 }}>
+                  Share your take — publish a short piece so other readers can find it.
+                </div>
+              </div>
+              <button onClick={() => router.push(`/write?about=${encodeURIComponent(book.title)}`)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: '#FFF', background: 'var(--tc)', border: 'none', borderRadius: 100, padding: '9px 14px', cursor: 'pointer', whiteSpace: 'nowrap' }}>Write about it</button>
+              <button onClick={() => setShowWritePrompt(false)} aria-label="Dismiss" style={{ background: 'none', border: 'none', color: 'var(--txD)', fontSize: 18, lineHeight: 1, cursor: 'pointer', padding: 4 }}>×</button>
+            </div>
+          )}
 
           {/* ── BRIDGE (preserved) ───────────────────────────────── */}
           {shelfCounts && <div style={{ textAlign: 'center', margin: '-28px auto 36px', fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>{shelfCounts.total} reader{shelfCounts.total !== 1 ? 's' : ''} shelved this{shelfCounts.reading > 0 ? ` · ${shelfCounts.reading} reading now` : ''}</div>}
