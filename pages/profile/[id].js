@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase'
 import { updateColor } from '../../lib/auth'
 import Logo from '../../components/Logo'
 import NotificationBell from '../../components/NotificationBell'
+import Bookshelf from '../../components/Bookshelf'
 import { createNotification } from '../../lib/notify'
 
 const COLORS = ['#8B6E52', '#5E7A62', '#C27A5A', '#6B6590', '#52708B', '#7A5278', '#8B7E52', '#8B5E5E', '#8B6E6E']
@@ -186,7 +187,7 @@ export default function ProfilePage() {
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontFamily: 'var(--hd)', fontSize: 28, fontWeight: 600, color: 'var(--ink)' }}>{member.first_name} {member.last_name}</div>
-            <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', marginTop: 4 }}><span onClick={() => openList('followers')} style={{ cursor: 'pointer' }}><b style={{ color: 'var(--ink)' }}>{followerCount}</b> follower{followerCount !== 1 ? 's' : ''}</span>{' · '}<span onClick={() => openList('following')} style={{ cursor: 'pointer' }}><b style={{ color: 'var(--ink)' }}>{followingCount}</b> following</span>{clubs.length > 0 ? ` · ${clubs.length} club${clubs.length !== 1 ? 's' : ''}` : ''}{shelfItems.length > 0 ? <span>{' · '}<span onClick={() => setTab('shelf')} style={{ cursor: 'pointer' }}><b style={{ color: 'var(--ink)' }}>{shelfItems.length}</b> shelved</span></span> : ''}</div>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', marginTop: 4 }}><span onClick={() => openList('followers')} style={{ cursor: 'pointer' }}><b style={{ color: 'var(--ink)' }}>{followerCount}</b> follower{followerCount !== 1 ? 's' : ''}</span>{' · '}<span onClick={() => openList('following')} style={{ cursor: 'pointer' }}><b style={{ color: 'var(--ink)' }}>{followingCount}</b> following</span>{clubs.length > 0 ? ` · ${clubs.length} club${clubs.length !== 1 ? 's' : ''}` : ''}{shelfItems.length > 0 ? <span>{' · '}<b style={{ color: 'var(--ink)' }}>{shelfItems.length}</b> shelved</span> : ''}</div>
             {(() => { const r = shelfItems.find(s => s.status === 'reading'); if (!r) return null; const href = r.book_key ? `/book/${r.book_key}` : (shelfLinks[r.title] ? `/book/${shelfLinks[r.title]}` : null); return <div onClick={() => href && router.push(href)} style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', marginTop: 6, cursor: href ? 'pointer' : 'default' }}>Currently reading <span style={{ fontStyle: 'italic', color: 'var(--ink)', fontWeight: 600 }}>{r.title}</span></div> })()}
           </div>
           {!isOwner && <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: following ? 'var(--sg)' : '#FFF', background: following ? 'rgba(94,122,98,0.1)' : 'var(--ink)', border: 'none', borderRadius: 8, padding: '10px 20px', cursor: 'pointer' }} onClick={toggleFollow}>{following ? 'Following' : 'Follow'}</button>}
@@ -202,8 +203,15 @@ export default function ProfilePage() {
 
         <div style={{ marginBottom: 32 }} />
 
+        {(isOwner || shelfItems.some(s => s.status === 'read')) && (
+          <div style={{ marginBottom: 36 }}>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 14 }}>Bookshelf</div>
+            <Bookshelf books={shelfItems.filter(s => s.status === 'read')} shelfLinks={shelfLinks} />
+          </div>
+        )}
+
         <div style={{ display: 'flex', borderBottom: '1px solid var(--bd)', marginBottom: 24 }}>
-          {[['writing', 'Writing'], ['clubs', 'Clubs'], ['shelf', 'Shelf'], ...(isOwner ? [['account', 'Account']] : [])].map(([k, l]) => (
+          {[['writing', 'Writing'], ['clubs', 'Clubs'], ...(isOwner ? [['account', 'Account']] : [])].map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: tab === k ? 'var(--ink)' : 'var(--txD)', background: 'none', border: 'none', cursor: 'pointer', padding: '12px 20px 12px 0', position: 'relative' }}>
               {l}{tab === k && <div style={{ position: 'absolute', bottom: -1, left: 0, right: 20, height: 2, background: 'var(--tc)', borderRadius: 2 }} />}
             </button>
@@ -291,27 +299,6 @@ export default function ProfilePage() {
               {isOwner && <button onClick={e => { e.stopPropagation(); togglePin(c.id, !c.pinned) }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, opacity: c.pinned ? 1 : 0.35, flexShrink: 0 }} aria-label={c.pinned ? 'Unpin' : 'Pin'}>📌</button>}
             </div>
           )) : <><div style={{ fontFamily: 'var(--hd)', fontSize: 16, fontStyle: 'italic', color: 'var(--txD)', padding: '24px 0' }}>Not in any clubs yet.</div><div style={{ marginTop: 16 }}><button style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 8, padding: '11px 20px', cursor: 'pointer' }} onClick={() => router.push('/create')}>Start a club</button></div></>}
-        </div>}
-
-        {tab === 'shelf' && <div>
-          {shelfItems.length > 0 ? ['reading', 'want', 'read'].map(st => {
-            const items = shelfItems.filter(s => s.status === st)
-            if (!items.length) return null
-            const label = st === 'reading' ? 'Reading' : st === 'want' ? 'Want to read' : 'Read'
-            return <div key={st} style={{ marginBottom: 24 }}>
-              <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 10 }}>{label}</div>
-              {items.map((s, i) => {
-                const href = s.book_key ? `/book/${s.book_key}` : (shelfLinks[s.title] ? `/book/${shelfLinks[s.title]}` : null)
-                return <div key={i} onClick={() => href && router.push(href)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 12, marginBottom: 8, cursor: href ? 'pointer' : 'default' }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{s.title}</div>
-                    {s.author && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>{s.author}</div>}
-                  </div>
-                  {href && <span style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--tc)', fontWeight: 600 }}>→</span>}
-                </div>
-              })}
-            </div>
-          }) : <div style={{ fontFamily: 'var(--hd)', fontSize: 16, fontStyle: 'italic', color: 'var(--txD)', padding: '24px 0' }}>{isOwner ? 'Your shelf is empty — add books from any book page.' : 'No books on the shelf yet.'}</div>}
         </div>}
       </div>
     </div>
