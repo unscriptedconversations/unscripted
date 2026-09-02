@@ -24,6 +24,8 @@ export default function Write() {
   const [isPublished, setIsPublished] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestNote, setSuggestNote] = useState('')
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -36,6 +38,14 @@ export default function Write() {
   }, [])
 
   useEffect(() => { if (id) loadWriting(id) }, [id])
+
+  // Prefill the book title as a starting tag when arriving from a book page
+  // (/write?about=Title). New pieces only; never clobber an existing draft.
+  useEffect(() => {
+    if (!router.isReady || id) return
+    const about = Array.isArray(router.query.about) ? router.query.about[0] : router.query.about
+    if (about) setTagsInput(prev => prev || String(about))
+  }, [router.isReady])
 
   async function loadMyClubs(memberId) {
     const { data } = await supabase.from('club_members').select('club:clubs(id, name)').eq('member_id', memberId)
@@ -53,6 +63,34 @@ export default function Write() {
       setTagsInput((data.tags || []).join(', '))
       setIsPublished(data.is_published)
     }
+  }
+
+  // AI theme suggestions (dormant until ANTHROPIC_API_KEY is set — returns
+  // nothing gracefully otherwise). Suggestions merge into the editable tags
+  // field for the author to review; never auto-applied.
+  async function suggestThemes() {
+    if (suggesting) return
+    if (content.trim().length < 200) { setSuggestNote('Write a little more first.'); return }
+    setSuggesting(true); setSuggestNote('')
+    try {
+      const r = await fetch('/api/themes', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title, content }),
+      })
+      const d = await r.json()
+      const themes = Array.isArray(d.themes) ? d.themes : []
+      if (!themes.length) { setSuggestNote('No suggestions right now.'); setSuggesting(false); return }
+      const existing = tagsInput.split(',').map(t => t.trim()).filter(Boolean)
+      const seen = new Set(existing.map(t => t.toLowerCase()))
+      const merged = [...existing]
+      for (const th of themes) { const k = th.toLowerCase(); if (!seen.has(k)) { seen.add(k); merged.push(th) } }
+      setTagsInput(merged.join(', '))
+      setSuggestNote(`Added ${themes.length} suggested theme${themes.length !== 1 ? 's' : ''} — edit as you like.`)
+    } catch {
+      setSuggestNote('Couldn’t suggest themes just now.')
+    }
+    setSuggesting(false)
   }
 
   async function save(publish) {
@@ -137,9 +175,14 @@ export default function Write() {
           onChange={e => setContent(e.target.value)}
         />
 
-        <label style={fl}>Themes (optional)</label>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+          <label style={fl}>Themes (optional)</label>
+          <button type="button" onClick={suggestThemes} disabled={suggesting} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, color: 'var(--tc)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', opacity: suggesting ? 0.5 : 1 }}>
+            {suggesting ? 'Suggesting…' : 'Suggest themes'}
+          </button>
+        </div>
         <input style={fi} placeholder="grief, identity, coming of age" value={tagsInput} onChange={e => setTagsInput(e.target.value)} />
-        <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginTop: -16, marginBottom: 28, lineHeight: 1.5 }}>Comma-separated. Helps readers find your writing by theme.</div>
+        <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginTop: -16, marginBottom: 28, lineHeight: 1.5 }}>{suggestNote || 'Comma-separated. Helps readers find your writing by theme.'}</div>
 
         {myClubs.length > 0 && <div style={{ marginBottom: 32 }}>
           <label style={fl}>Tag a club (optional)</label>
