@@ -22,6 +22,25 @@ export default function BookPage() {
   useEffect(() => { if (book?.title) loadShelf() }, [book])
   useEffect(() => { if (book?.title) loadShelfCounts() }, [book])
 
+  // Auth state for the nav (Log in/Join vs profile/Log out). Uses the
+  // canonical auth_id link; kept in sync on login/logout/OAuth.
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) return
+      const { data: m } = await supabase.from('members').select('id, first_name').eq('auth_id', session.user.id).maybeSingle()
+      if (m) setCurrentUser(m)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session) {
+        const { data: m } = await supabase.from('members').select('id, first_name').eq('auth_id', session.user.id).maybeSingle()
+        if (m) setCurrentUser(m)
+      } else {
+        setCurrentUser(null)
+      }
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
   async function loadShelfCounts() {
     const { data } = await supabase.from('shelves').select('status').eq('title', book.title)
     if (!data || !data.length) { setShelfCounts(null); return }
@@ -106,7 +125,7 @@ export default function BookPage() {
   async function loadShelf() {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) return
-    const { data: m } = await supabase.from('members').select('id').eq('auth_id', session.user.id).maybeSingle()
+    const { data: m } = await supabase.from('members').select('id, first_name').eq('auth_id', session.user.id).maybeSingle()
     if (!m) return
     setCurrentUser(m)
     const { data: s } = await supabase.from('shelves').select('status').eq('member_id', m.id).eq('title', book.title).maybeSingle()
@@ -119,7 +138,7 @@ export default function BookPage() {
     if (!session) { router.push('/signup'); return }
     let member = currentUser
     if (!member) {
-      const { data: m } = await supabase.from('members').select('id').eq('auth_id', session.user.id).maybeSingle()
+      const { data: m } = await supabase.from('members').select('id, first_name').eq('auth_id', session.user.id).maybeSingle()
       member = m; setCurrentUser(m)
     }
     if (!member) return
@@ -153,7 +172,19 @@ export default function BookPage() {
           <div className="brand" onClick={() => router.push('/')}><Logo /></div>
           <div className="nav-links">
             <button className="nav-btn" onClick={() => router.push('/')}>Explore</button>
-            <button className="join-btn" onClick={() => router.push('/signup')}>Join</button>
+            {currentUser ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
+                  <span className="user-nav-name">{currentUser.first_name}</span>
+                </div>
+                <span style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--txD)', cursor: 'pointer' }} onClick={async () => { try { await supabase.auth.signOut({ scope: 'local' }) } catch (e) {} setCurrentUser(null) }}>Log out</span>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <span style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 600, color: 'var(--ink)', cursor: 'pointer' }} onClick={() => router.push('/login')}>Log in</span>
+                <button className="join-btn" onClick={() => router.push('/signup')}>Join</button>
+              </div>
+            )}
           </div>
         </nav>
 
