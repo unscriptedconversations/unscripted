@@ -23,16 +23,16 @@ export default function BookPage() {
   useEffect(() => { if (book?.title) loadShelfCounts() }, [book])
 
   // Auth state for the nav (Log in/Join vs profile/Log out). Uses the
-  // canonical auth_id link; kept in sync on login/logout/OAuth.
+  // Real link in this DB is members.id = auth.uid() (auth_id is unused).
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) return
-      const { data: m } = await supabase.from('members').select('id, first_name').eq('auth_id', session.user.id).maybeSingle()
+      const { data: m } = await supabase.from('members').select('id, first_name').eq('id', session.user.id).maybeSingle()
       if (m) setCurrentUser(m)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session) {
-        const { data: m } = await supabase.from('members').select('id, first_name').eq('auth_id', session.user.id).maybeSingle()
+        const { data: m } = await supabase.from('members').select('id, first_name').eq('id', session.user.id).maybeSingle()
         if (m) setCurrentUser(m)
       } else {
         setCurrentUser(null)
@@ -125,7 +125,7 @@ export default function BookPage() {
   async function loadShelf() {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) return
-    const { data: m } = await supabase.from('members').select('id, first_name').eq('auth_id', session.user.id).maybeSingle()
+    const { data: m } = await supabase.from('members').select('id, first_name').eq('id', session.user.id).maybeSingle()
     if (!m) return
     setCurrentUser(m)
     const { data: s } = await supabase.from('shelves').select('status').eq('member_id', m.id).eq('title', book.title).maybeSingle()
@@ -138,7 +138,7 @@ export default function BookPage() {
     if (!session) { router.push('/signup'); return }
     let member = currentUser
     if (!member) {
-      const { data: m } = await supabase.from('members').select('id, first_name').eq('auth_id', session.user.id).maybeSingle()
+      const { data: m } = await supabase.from('members').select('id, first_name').eq('id', session.user.id).maybeSingle()
       member = m; setCurrentUser(m)
     }
     if (!member) return
