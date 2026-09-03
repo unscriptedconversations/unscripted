@@ -1,3 +1,4 @@
+
 // components/ClubChat.jsx
 // Real-time casual side-channel for a club. Self-contained: give it a clubId and
 // it resolves its own session/member/host, loads full history (no join-date gate),
