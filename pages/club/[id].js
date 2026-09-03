@@ -381,7 +381,7 @@ export default function ClubPage() {
   }
 
   async function addBook() {
-    if (!newBook.title) return
+    if (!isHost || !newBook.title) return
     await supabase.from('books').update({ status: 'completed' }).eq('club_id', id).eq('status', 'current')
     const chapters = newBook.noCh ? 0 : parseInt(newBook.chapters) || 0
     const { data: book } = await supabase.from('books').insert({ title: newBook.title, author: newBook.author, total_chapters: chapters, current_chapter: 0, status: 'current', display_order: books.length + 1, club_id: id, isbn: newBook.isbn, book_key: newBook.book_key, source: newBook.source, added_by: currentUser.id, tags: newBook.tags, tags_norm: normalizeTags(newBook.tags) }).select().single()
@@ -527,7 +527,7 @@ export default function ClubPage() {
       <title>{club.name} — unscripted</title>
 
       {/* ADD BOOK MODAL */}
-      {showAddBook && <div className="modal-overlay" onClick={() => setShowAddBook(false)}>
+      {showAddBook && isHost && <div className="modal-overlay" onClick={() => setShowAddBook(false)}>
         <div className="modal-box" onClick={e => e.stopPropagation()}>
           <button className="modal-close" onClick={() => setShowAddBook(false)}>×</button>
           <h2 className="modal-title" style={{ fontSize: 28 }}>Add a new book</h2>
@@ -696,13 +696,13 @@ export default function ClubPage() {
           </div>
           <div className="sidebar">
             {curBook && <div className="sidebar-section"><div className="sidebar-label">Currently Reading</div><div className="book-card" style={{ cursor: 'pointer' }} onClick={() => setView('disc')}><div className="book-card-inner" style={{ padding: 24 }}><div className="book-title" style={{ fontSize: 20 }}>{curBook.title}</div><div className="book-author" style={{ marginBottom: 12 }}>{curBook.author}</div><ChapterProgress book={curBook} /></div></div></div>}
-            <div className="sidebar-section"><div className="sidebar-label">Books ({books.length})</div>{books.map(b => <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 10, marginBottom: 6, cursor: 'pointer' }} onClick={() => { setSelBook(b.id); setView('disc') }}><span className="tag" style={{ background: b.status === 'current' ? 'var(--tcD)' : 'rgba(94,122,98,0.1)', color: b.status === 'current' ? 'var(--tc)' : 'var(--sg)' }}>{b.status === 'current' ? 'now' : 'done'}</span><div style={{ flex: 1 }}><span style={{ fontFamily: 'var(--hd)', fontSize: 13, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</span><ChapterProgress book={b} showLabel={false} compact /></div></div>)}<button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer', width: '100%', marginTop: 8 }} onClick={() => setShowAddBook(true)}>+ Add book</button></div>
+            <div className="sidebar-section"><div className="sidebar-label">Books ({books.length})</div>{books.map(b => <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 10, marginBottom: 6, cursor: 'pointer' }} onClick={() => { setSelBook(b.id); setView('disc') }}><span className="tag" style={{ background: b.status === 'current' ? 'var(--tcD)' : 'rgba(94,122,98,0.1)', color: b.status === 'current' ? 'var(--tc)' : 'var(--sg)' }}>{b.status === 'current' ? 'now' : 'done'}</span><div style={{ flex: 1 }}><span style={{ fontFamily: 'var(--hd)', fontSize: 13, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</span><ChapterProgress book={b} showLabel={false} compact /></div></div>)}{isHost && <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer', width: '100%', marginTop: 8 }} onClick={() => setShowAddBook(true)}>+ Add book</button>}</div>
           </div>
         </div>}
 
         {/* BOOKSHELF / DISCUSSIONS */}
         {view === 'disc' && <div style={{ paddingBottom: 80 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><div className="section-title">Bookshelf</div><button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer' }} onClick={() => setShowAddBook(true)}>+ Add book</button></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><div className="section-title">Bookshelf</div>{isHost && <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer' }} onClick={() => setShowAddBook(true)}>+ Add book</button>}</div>
           <div className="shelf">{books.map(b => <div key={b.id} className={`shelf-item ${selBook === b.id ? 'active' : ''}`} onClick={() => { setSelBook(b.id); setDiscMode('chapters') }}><div className={`shelf-title ${selBook === b.id ? 'inv' : ''}`}>{b.title}</div><div className={`shelf-author ${selBook === b.id ? 'inv' : ''}`}>{b.author}</div><span className="tag" style={{ background: b.status === 'current' ? (selBook === b.id ? 'rgba(194,122,90,0.25)' : 'var(--tcD)') : (selBook === b.id ? 'rgba(94,122,98,0.25)' : 'rgba(94,122,98,0.1)'), color: b.status === 'current' ? 'var(--tc)' : 'var(--sg)', width: 'fit-content', marginTop: 4 }}>{b.status === 'current' ? 'Reading Now' : 'Completed'}</span><ChapterProgress book={b} /></div>)}</div>
 
           {activeBook && <>
