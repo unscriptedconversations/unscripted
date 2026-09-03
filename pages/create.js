@@ -74,7 +74,7 @@ export default function CreateClub() {
   }
 
   async function create() {
-    if (!currentUser || !name.trim()) { setError('Give your club a name.'); return }
+    if (!currentUser || !name.trim() || !desc.trim()) { setError(!name.trim() ? 'Give your club a name.' : 'Add a short description.'); return }
     setError(''); setCreating(true)
     const tags = themes.split(',').map(t => t.trim()).filter(Boolean)
 
@@ -223,7 +223,7 @@ export default function CreateClub() {
             </div>
           </div>}
 
-          <button style={{ ...btn, opacity: creating || !name.trim() ? 0.5 : 1 }} disabled={creating || !name.trim()} onClick={create}>{creating ? 'Creating…' : 'Create club'}</button>
+          <button style={{ ...btn, opacity: creating || !name.trim() || !desc.trim() ? 0.5 : 1 }} disabled={creating || !name.trim() || !desc.trim()} onClick={create}>{creating ? 'Creating…' : 'Create club'}</button>
         </div>
       </div>
     </div>
