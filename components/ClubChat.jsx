@@ -1,354 +1,919 @@
-
-// components/ClubChat.jsx
-// Real-time casual side-channel for a club. Self-contained: give it a clubId and
-// it resolves its own session/member/host, loads full history (no join-date gate),
-// subscribes to Supabase Realtime, and handles posting + deleting.
-//
-// Delete: your own message, or any message if you host this club (mirrors the
-// club_messages RLS, so the UI only offers what the DB will allow).
-//
-// Realtime: INSERT is filtered to this club; DELETE can't be club-filtered
-// (the old record carries only the PK), so we just drop by id — harmless, since
-// we'd never be holding another club's message in state anyway.
-
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
-import { supabase } from '../lib/supabase'
-import { notifyMentions } from '../lib/notify'
+import { supabase } from '../../lib/supabase'
+import Logo from '../../components/Logo'
+import Tag from '../../components/Tag'
+import NotificationBell from '../../components/NotificationBell'
+import ClubChat from '../../components/ClubChat'
+import { notifyMentions, createNotification, notifyClubPost } from '../../lib/notify'
+import ManualBookAdd from '../../components/ManualBookAdd'
+import { normalizeTags } from '../../lib/tags'
 
-const fmtTime = (ts) => {
-  try {
-    return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  } catch { return '' }
+function timeAgo(date) {
+  const s = Math.floor((Date.now() - new Date(date)) / 1000)
+  if (s < 60) return 'now'
+  if (s < 3600) return Math.floor(s / 60) + 'm'
+  if (s < 86400) return Math.floor(s / 3600) + 'h'
+  return Math.floor(s / 86400) + 'd'
 }
 
-const labelFor = (m) => (m?.first_name || m?.initials || '—')
+function progressColor(pct) {
+  if (pct >= 80) return '#5E7A62'
+  if (pct >= 50) return '#7A9A7E'
+  if (pct >= 25) return '#C27A5A'
+  return '#B0A594'
+}
 
-// Small avatar used in the welcome/empty state.
-function Avatar({ member, size = 34 }) {
-  const initials = member?.initials || (member?.first_name || '—')[0]
+// ── Streak logic ──────────────────────────────────────────────────────
+// Local-date string (YYYY-MM-DD) so streaks roll over at the reader's midnight.
+function localDateStr(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+// Whole calendar days from a→b (both YYYY-MM-DD).
+function daysBetween(aStr, bStr) {
+  const a = new Date(aStr + 'T00:00:00'), b = new Date(bStr + 'T00:00:00')
+  return Math.round((b - a) / 86400000)
+}
+// Given the stored last-activity date + current/longest streak, return the
+// next values. `changed:false` means today already counted — skip the write.
+function computeStreak(lastDate, streak = 0, longest = 0) {
+  const today = localDateStr()
+  if (!lastDate) return { streak: 1, longest: Math.max(longest, 1), date: today, changed: true }
+  const diff = daysBetween(lastDate, today)
+  if (diff <= 0) return { streak: streak || 1, longest, date: lastDate, changed: false } // same day
+  if (diff === 1) { const ns = (streak || 0) + 1; return { streak: ns, longest: Math.max(longest, ns), date: today, changed: true } }
+  return { streak: 1, longest: Math.max(longest, 1), date: today, changed: true } // gap → reset
+}
+
+const MUTE_OPTS = [
+  ['For 15 minutes', 15 * 60 * 1000],
+  ['For 1 hour', 60 * 60 * 1000],
+  ['For 3 hours', 3 * 60 * 60 * 1000],
+  ['For 8 hours', 8 * 60 * 60 * 1000],
+  ['For 24 hours', 24 * 60 * 60 * 1000],
+  ['Until I turn it back on', 'forever'],
+]
+function muteLabel(val) {
+  if (!val) return null
+  const d = new Date(val)
+  if (d.getFullYear() > 9000) return 'Muted'
+  return 'Muted until ' + d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+function SheetRow({ icon, label, danger, onClick }) {
+  return <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%', padding: '15px 16px', background: 'none', border: 'none', borderRadius: 12, cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--ui)', fontSize: 15, fontWeight: 600, color: danger ? '#A0603E' : 'var(--ink)' }}>
+    {icon && <span style={{ fontSize: 18, width: 22, textAlign: 'center', flexShrink: 0 }}>{icon}</span>}
+    <span>{label}</span>
+  </button>
+}
+
+function initialsFor(member) {
+  if (member?.initials) return member.initials
+  const f = (member?.first_name || '')[0] || ''
+  const l = (member?.last_name || '')[0] || ''
+  return (f + l).toUpperCase() || '?'
+}
+const AVATAR_COLORS = ['#C27A5A', '#5E7A62', '#A0603E', '#7A9A7E', '#B0855A', '#6E8B6E', '#B0A594']
+function colorFor(member) {
+  if (member?.color) return member.color
+  const seed = String(member?.id || member?.email || member?.first_name || '')
+  let h = 0
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0
+  return AVATAR_COLORS[h % AVATAR_COLORS.length]
+}
+function MemberAvatar({ member, size = 36 }) {
+  return <div style={{ width: size, height: size, borderRadius: '50%', background: colorFor(member), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.36, fontWeight: 700, fontFamily: 'var(--ui)', color: '#FFF', flexShrink: 0, border: '2px solid rgba(255,255,255,0.15)' }}>{initialsFor(member)}</div>
+}
+
+function ChapterProgress({ book, showLabel = true, compact = false }) {
+  const total = book.total_chapters || 0
+  if (!total) return null
+  const cur = Math.min(book.current_chapter || 0, total)
+  const pct = Math.round((cur / total) * 100)
   return (
-    <div style={{
-      flex: '0 0 auto', width: size, height: size, borderRadius: '50%',
-      background: member?.color || 'var(--tc)', color: '#fff',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontFamily: 'var(--ui)', fontSize: size * 0.36, fontWeight: 700,
-      border: '2px solid var(--sf)',
-    }}>
-      {initials}
+    <div style={{ marginTop: compact ? 6 : 10, width: '100%' }}>
+      <div style={{ height: compact ? 4 : 6, background: 'var(--bd)', borderRadius: 100, overflow: 'hidden' }}>
+        <div style={{ width: pct + '%', height: '100%', background: progressColor(pct), borderRadius: 100, transition: 'width 0.3s' }} />
+      </div>
+      {showLabel && <div style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 600, color: 'var(--txD)', marginTop: 5 }}>Chapter {cur} of {total}</div>}
     </div>
   )
 }
 
-export default function ClubChat({ clubId }) {
+function StreakStats({ member }) {
+  const stats = [
+    { icon: '\u270D\uFE0F', n: member.write_streak || 0, label: 'day writing streak', longest: member.longest_write_streak || 0, color: 'var(--tc)' },
+    { icon: '\uD83D\uDCD6', n: member.read_streak || 0, label: 'day reading streak', longest: member.longest_read_streak || 0, color: 'var(--sg)' },
+  ]
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 28 }}>
+      {stats.map((s, i) => (
+        <div key={i} style={{ position: 'relative', overflow: 'hidden', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '18px 20px' }}>
+          <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 3, background: s.color }} />
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span style={{ fontSize: 20 }}>{s.icon}</span>
+            <span style={{ fontFamily: 'var(--hd)', fontSize: 30, fontWeight: 600, color: 'var(--ink)', lineHeight: 1 }}>{s.n}</span>
+          </div>
+          <div style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, color: 'var(--txD)', marginTop: 6 }}>{s.label}</div>
+          {s.longest > s.n && <div style={{ fontFamily: 'var(--ui)', fontSize: 10, color: 'var(--txM)', marginTop: 2 }}>Longest \u00B7 {s.longest} days</div>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ThemePill({ t, active, onClick }) {
+  return <span onClick={onClick} style={{fontFamily:'var(--ui)',fontSize:10,fontWeight:600,letterSpacing:1,color:active?'var(--tc)':'var(--txM)',background:active?'var(--tcD)':'var(--sf2)',border:'1px solid '+(active?'var(--tc)':'var(--bd)'),borderRadius:100,padding:'4px 14px',cursor:onClick?'pointer':'default'}}>{t}</span>
+}
+
+export default function ClubPage() {
   const router = useRouter()
-  const [me, setMe] = useState(null)          // { id, first_name, initials, color }
-  const [isHost, setIsHost] = useState(false)
-  const [messages, setMessages] = useState([])
-  const [text, setText] = useState('')
-  const [ready, setReady] = useState(false)
-  const [sending, setSending] = useState(false)
-  const [chatHidden, setChatHidden] = useState(false)
+  const { id } = router.query
 
-  const memberCache = useRef(new Map())       // member_id -> { first_name, initials, color }
-  const rosterRef = useRef([])                // [{ id, first_name, last_name }] for @mention resolution
-  const scrollRef = useRef(null)
-  const meRef = useRef(null)
+  const [club, setClub] = useState(null)
+  const [members, setMembers] = useState([])
+  const [books, setBooks] = useState([])
+  const [threads, setThreads] = useState([])
+  const [posts, setPosts] = useState([])
+  const [likes, setLikes] = useState([])
+  const [currentUser, setCurrentUser] = useState(null)
+  const [view, setView] = useState('feed')
+  const [selBook, setSelBook] = useState(null)
+  const [discMode, setDiscMode] = useState('chapters')
+  const [filterTheme, setFilterTheme] = useState(null)
+  const [newPost, setNewPost] = useState('')
+  const [newSit, setNewSit] = useState('')
+  const [newThemes, setNewThemes] = useState('')
+  const [profileMember, setProfileMember] = useState(null)
+  const [activeThread, setActiveThread] = useState(null)
+  const [threadPosts, setThreadPosts] = useState([])
+  const [threadNewPost, setThreadNewPost] = useState('')
+  const [threadNewSit, setThreadNewSit] = useState('')
+  const [threadNewThemes, setThreadNewThemes] = useState('')
+  const [replyingTo, setReplyingTo] = useState(null)
+  const [replyText, setReplyText] = useState('')
+  const [expandedReplies, setExpandedReplies] = useState({})
+  const [showAddBook, setShowAddBook] = useState(false)
+  const [showIsbn, setShowIsbn] = useState(false)
+  const [bkQ, setBkQ] = useState('')
+  const [bkR, setBkR] = useState([])
+  const [bkL, setBkL] = useState(false)
+  const [newBook, setNewBook] = useState({ title: '', author: '', chapters: '', noCh: false, isbn: null, book_key: null, source: 'openlibrary', tags: [] })
+  const timer = useRef(null)
+
+  // Settings form state
+  const [memberships, setMemberships] = useState([])
+  const [settingsName, setSettingsName] = useState('')
+  const [settingsDesc, setSettingsDesc] = useState('')
+  const [settingsThemes, setSettingsThemes] = useState('')
+  const [settingsSaved, setSettingsSaved] = useState(false)
+  const [leaveConfirm, setLeaveConfirm] = useState(false)
+  const [inviteCopied, setInviteCopied] = useState(false)
+  const [profileReplyCount, setProfileReplyCount] = useState(0)
+  const [showHow, setShowHow] = useState(false)
+  const [actionSheet, setActionSheet] = useState(null)
+  const [memberProgress, setMemberProgress] = useState({})
+  const [showEditProfile, setShowEditProfile] = useState(false)
+  const [editForm, setEditForm] = useState({ fav_book: '', fav_book_author: '', one_word: '', fav_cartoon: '' })
+  const [chatUnread, setChatUnread] = useState(0)
+  const viewRef = useRef('feed')
+  useEffect(() => { viewRef.current = view }, [view])
 
   useEffect(() => {
-    let channel
-    ;(async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) { setReady(true); return }
-
+    // Load session from Supabase Auth (replaces localStorage)
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) return
       const { data: member } = await supabase
-        .from('members')
-        .select('id, first_name, initials, color')
-        .eq('auth_id', session.user.id)
-        .maybeSingle()
-      if (!member) { setReady(true); return }
-      setMe(member); meRef.current = member
-      memberCache.current.set(member.id, member)
+        .from('members').select('*').eq('id', session.user.id).maybeSingle()
+      if (member) setCurrentUser(member)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session) {
+        const { data: member } = await supabase
+          .from('members').select('*').eq('id', session.user.id).maybeSingle()
+        if (member) setCurrentUser(member)
+      } else {
+        setCurrentUser(null)
+      }
+    })
+    return () => subscription.unsubscribe()
+  }, [])
 
-      const { data: membership } = await supabase
-        .from('club_members')
-        .select('role, chat_hidden')
-        .eq('club_id', clubId)
-        .eq('member_id', member.id)
-        .maybeSingle()
-      setIsHost(membership?.role === 'host')
-      setChatHidden(!!membership?.chat_hidden)
+  useEffect(() => { if (id) loadClub() }, [id])
 
-      // Roster for @mention → member-id resolution (same shape notifyMentions uses elsewhere).
-      const { data: roster } = await supabase
-        .from('club_members')
-        .select('members(id, first_name, last_name, initials, color)')
-        .eq('club_id', clubId)
-      rosterRef.current = (roster || []).map((r) => r.members).filter(Boolean)
-
-      const { data: history } = await supabase
-        .from('club_messages')
-        .select('id, content, created_at, member_id, members(first_name, initials, color)')
-        .eq('club_id', clubId)
-        .order('created_at', { ascending: true })
-
-      const rows = history || []
-      for (const r of rows) if (r.members) memberCache.current.set(r.member_id, r.members)
-      setMessages(rows)
-      setReady(true)
-      markChatRead() // opening the tab clears the unread count
-
-      channel = supabase
-        .channel(`club_messages:${clubId}`)
-        .on('postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'club_messages', filter: `club_id=eq.${clubId}` },
-          handleInsert)
-        .on('postgres_changes',
-          { event: 'DELETE', schema: 'public', table: 'club_messages' },
-          (payload) => {
-            const id = payload.old?.id
-            if (id) setMessages((prev) => prev.filter((m) => m.id !== id))
-          })
-        .subscribe()
-    })()
-
-    return () => { if (channel) supabase.removeChannel(channel) }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clubId])
-
-  // Keep pinned to the latest message.
+  // Reading streak: visiting the club page counts as reading activity (once/day).
   useEffect(() => {
-    const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [messages.length])
+    if (!currentUser || !id) return
+    const r = computeStreak(currentUser.last_read_date, currentUser.read_streak, currentUser.longest_read_streak)
+    if (!r.changed) return
+    const upd = { read_streak: r.streak, last_read_date: r.date, longest_read_streak: r.longest }
+    supabase.from('members').update(upd).eq('id', currentUser.id).then(() => {
+      setCurrentUser(prev => ({ ...prev, ...upd }))
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, id])
 
-  async function handleInsert(payload) {
-    const row = payload.new
-    if (!row) return
-    let member = memberCache.current.get(row.member_id)
-    if (!member) {
-      const { data } = await supabase
-        .from('members').select('first_name, initials, color').eq('id', row.member_id).maybeSingle()
-      member = data || null
-      if (member) memberCache.current.set(row.member_id, member)
+  // Opening a club marks its feed read (powers the homepage unread badge).
+  useEffect(() => {
+    if (!currentUser || !id) return
+    supabase.from('club_members').update({ last_visited_at: new Date().toISOString() }).eq('club_id', id).eq('member_id', currentUser.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, id])
+
+  // Load this reader's own per-book chapter progress
+  useEffect(() => {
+    if (!currentUser) return
+    supabase.from('member_progress').select('book_id, current_chapter').eq('member_id', currentUser.id).then(({ data }) => {
+      if (data) { const m = {}; data.forEach(r => { m[r.book_id] = r.current_chapter }); setMemberProgress(m) }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id])
+
+  // Chat unread badge — initial count: messages from others since my last read.
+  // Skipped if I've left the chat or the Chat tab is already open. chat_last_read_at
+  // comes from the membership loadClub already fetched.
+  useEffect(() => {
+    if (!currentUser || !id) return
+    if (viewRef.current === 'chat') return
+    const cm = memberships.find(m => m.member_id === currentUser.id)
+    if (!cm || cm.chat_hidden) { setChatUnread(0); return }
+    let q = supabase.from('club_messages').select('id', { count: 'exact', head: true })
+      .eq('club_id', id).neq('member_id', currentUser.id)
+    if (cm.chat_last_read_at) q = q.gt('created_at', cm.chat_last_read_at)
+    q.then(({ count }) => setChatUnread(count || 0))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, id, memberships.length])
+
+  // Chat unread badge — live: bump when a message arrives from someone else while
+  // the Chat tab isn't open. viewRef avoids a stale-closure read of `view`.
+  useEffect(() => {
+    if (!currentUser || !id) return
+    const cm = memberships.find(m => m.member_id === currentUser.id)
+    if (!cm || cm.chat_hidden) return
+    const channel = supabase
+      .channel(`club_chat_badge:${id}`)
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'club_messages', filter: `club_id=eq.${id}` },
+        (payload) => {
+          const row = payload.new
+          if (!row || row.member_id === currentUser.id) return
+          if (viewRef.current === 'chat') return
+          setChatUnread(n => n + 1)
+        })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, id, memberships.length])
+
+  // Opening the Chat tab clears the badge (ClubChat stamps chat_last_read_at on mount).
+  useEffect(() => {
+    if (view === 'chat') setChatUnread(0)
+  }, [view])
+
+  async function loadClub() {
+    const { data: c } = await supabase.from('clubs').select('*').eq('id', id).single()
+    if (c) { setClub(c); setSettingsName(c.name || ''); setSettingsDesc(c.description || '')
+        setSettingsThemes((c.tags || []).join(', ')) }
+    const { data: cm } = await supabase.from('club_members').select('*, member:members(*)').eq('club_id', id)
+    if (cm) {
+      setMembers(cm.map(x => x.member).filter(Boolean))
+      setMemberships(cm) // store full membership data including role
     }
-    setMessages((prev) =>
-      prev.some((m) => m.id === row.id) ? prev : [...prev, { ...row, members: member }]
-    )
-    // A message arrived while the tab is open — keep our read marker current so
-    // it doesn't count as unread the next time the badge is computed.
-    markChatRead()
+    const { data: bk } = await supabase.from('books').select('*').eq('club_id', id).order('display_order')
+    if (bk) { setBooks(bk); if (!selBook && bk[0]) setSelBook(bk[0].id) }
+    const { data: th } = await supabase.from('threads').select('*').order('chapter_number')
+    if (th) setThreads(th)
+    const { data: ps } = await supabase.from('posts').select('*, member:members(*)').eq('club_id', id).order('created_at', { ascending: false })
+    if (ps) setPosts(ps)
+    const { data: lk } = await supabase.from('likes').select('*')
+    if (lk) setLikes(lk)
   }
 
-  // Stamp this member's chat_last_read_at = now(). Uses meRef so it's safe to
-  // call from the mount flow (before `me` state settles) and the realtime handler.
-  async function markChatRead() {
-    const meNow = meRef.current
-    if (!meNow) return
-    await supabase
-      .from('club_members')
-      .update({ chat_last_read_at: new Date().toISOString() })
-      .eq('club_id', clubId)
-      .eq('member_id', meNow.id)
+  async function loadThreadPosts(threadId) {
+    const { data } = await supabase.from('thread_replies').select('*, member:members(*)').eq('thread_id', threadId).order('created_at')
+    if (data) setThreadPosts(data)
   }
 
-  // Highlight "@name" as a link to the member's profile when it matches a club
-  // member. Same matching rules as the club page's renderContent (first name or
-  // full name, underscores tolerated). Uses the roster we loaded on mount.
+  // Clears the new-member empty state once they contribute (per club).
+  async function markHasPosted() {
+    if (!currentUser || !currentMembership || currentMembership.has_posted) return
+    await supabase.from('club_members').update({ has_posted: true }).eq('club_id', id).eq('member_id', currentUser.id)
+    setMemberships(prev => prev.map(m => m.member_id === currentUser.id ? { ...m, has_posted: true } : m))
+  }
+
+  async function applyMute(ms) {
+    if (!currentUser) return
+    const val = ms === null ? null : ms === 'forever' ? '9999-12-31T00:00:00Z' : new Date(Date.now() + ms).toISOString()
+    await supabase.from('club_members').update({ muted_until: val }).eq('club_id', id).eq('member_id', currentUser.id)
+    setMemberships(prev => prev.map(m => m.member_id === currentUser.id ? { ...m, muted_until: val } : m))
+    setActionSheet(null)
+  }
+
+  async function markFeedRead() {
+    if (!currentUser) return
+    const now = new Date().toISOString()
+    await supabase.from('club_members').update({ last_visited_at: now }).eq('club_id', id).eq('member_id', currentUser.id)
+    setMemberships(prev => prev.map(m => m.member_id === currentUser.id ? { ...m, last_visited_at: now } : m))
+    setActionSheet(null)
+  }
+
+  // Writing streak: any post or thread reply counts as writing activity (once/day).
+  async function bumpWriteStreak() {
+    if (!currentUser) return
+    const r = computeStreak(currentUser.last_write_date, currentUser.write_streak, currentUser.longest_write_streak)
+    if (!r.changed) return
+    const upd = { write_streak: r.streak, last_write_date: r.date, longest_write_streak: r.longest }
+    await supabase.from('members').update(upd).eq('id', currentUser.id)
+    setCurrentUser(prev => ({ ...prev, ...upd }))
+  }
+
+  async function submitPost() {
+    if (!newPost.trim() || !currentUser) return
+    const tag = document.getElementById('club-tag-select')?.value || 'community'
+    await supabase.from('posts').insert({ member_id: currentUser.id, content: newPost.trim(), tag, sitting_with: newSit.trim() || null, themes: newThemes.trim() || null, club_id: id })
+    notifyMentions({ text: newPost, members, actorId: currentUser.id, link: `/club/${id}`, preview: newPost.trim().slice(0, 60) })
+    notifyClubPost({ recipients: members.map(m => m.id), actorId: currentUser.id, clubId: id, clubName: club?.name })
+    await bumpWriteStreak()
+    await markHasPosted()
+    setNewPost(''); setNewSit(''); setNewThemes(''); loadClub()
+  }
+
+  async function submitThreadPost() {
+    if (!threadNewPost.trim() || !currentUser || !activeThread) return
+    await supabase.from('thread_replies').insert({ thread_id: activeThread.id, member_id: currentUser.id, content: threadNewPost.trim(), sitting_with: threadNewSit.trim() || null, themes: threadNewThemes.trim() || null })
+    notifyMentions({ text: threadNewPost, members, actorId: currentUser.id, link: `/club/${id}`, preview: threadNewPost.trim().slice(0, 60) })
+    await bumpWriteStreak()
+    await markHasPosted()
+    setThreadNewPost(''); setThreadNewSit(''); setThreadNewThemes(''); loadThreadPosts(activeThread.id)
+  }
+
+  async function submitReply(parentId) {
+    if (!replyText.trim() || !currentUser || !activeThread) return
+    await supabase.from('thread_replies').insert({ thread_id: activeThread.id, member_id: currentUser.id, content: replyText.trim(), parent_reply_id: parentId })
+    notifyMentions({ text: replyText, members, actorId: currentUser.id, link: `/club/${id}`, preview: replyText.trim().slice(0, 60) })
+    const parent = threadPosts.find(tp => tp.id === parentId)
+    if (parent?.member_id) createNotification({ recipientId: parent.member_id, actorId: currentUser.id, type: 'reply', link: `/club/${id}`, preview: replyText.trim().slice(0, 60) })
+    await bumpWriteStreak()
+    await markHasPosted()
+    setReplyText(''); setReplyingTo(null); setExpandedReplies(p => ({ ...p, [parentId]: true })); loadThreadPosts(activeThread.id)
+  }
+
+  async function toggleLike(postId) {
+    if (!currentUser) return
+    const ex = likes.find(l => l.post_id === postId && l.member_id === currentUser.id)
+    if (ex) await supabase.from('likes').delete().eq('id', ex.id)
+    else await supabase.from('likes').insert({ post_id: postId, member_id: currentUser.id })
+    loadClub()
+  }
+
+  function searchBook(val) {
+    setBkQ(val)
+    if (timer.current) clearTimeout(timer.current)
+    if (val.length < 3) { setBkR([]); return }
+    setBkL(true)
+    timer.current = setTimeout(async () => {
+      try {
+        const r = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(val)}&limit=5&fields=title,author_name,first_publish_year,cover_i`)
+        const d = await r.json()
+        setBkR((d.docs || []).map(b => ({ title: b.title, author: (b.author_name || [])[0] || 'Unknown', year: b.first_publish_year, cover: b.cover_i ? `https://covers.openlibrary.org/b/id/${b.cover_i}-S.jpg` : null })))
+      } catch (e) { setBkR([]) }
+      setBkL(false)
+    }, 400)
+  }
+
+  async function addBook() {
+    if (!isHost || !newBook.title) return
+    await supabase.from('books').update({ status: 'completed' }).eq('club_id', id).eq('status', 'current')
+    const chapters = newBook.noCh ? 0 : parseInt(newBook.chapters) || 0
+    const { data: book } = await supabase.from('books').insert({ title: newBook.title, author: newBook.author, total_chapters: chapters, current_chapter: 0, status: 'current', display_order: books.length + 1, club_id: id, isbn: newBook.isbn, book_key: newBook.book_key, source: newBook.source, added_by: currentUser.id, tags: newBook.tags, tags_norm: normalizeTags(newBook.tags) }).select().single()
+    if (book && chapters > 0) {
+      const ins = Array.from({ length: chapters }, (_, i) => ({ book_id: book.id, chapter_number: i + 1, title: `Chapter ${i + 1}`, is_active: true }))
+      ins.push({ book_id: book.id, chapter_number: 0, title: `Open Discussion: ${newBook.title}`, is_active: true })
+      await supabase.from('threads').insert(ins)
+    } else if (book) {
+      await supabase.from('threads').insert({ book_id: book.id, chapter_number: 0, title: `Open Discussion: ${newBook.title}`, is_active: true })
+    }
+    setShowAddBook(false); setNewBook({ title: '', author: '', chapters: '', noCh: false, isbn: null, book_key: null, source: 'openlibrary', tags: [] }); setBkQ(''); setBkR([]); setShowIsbn(false); loadClub()
+  }
+
+  async function setBookChapter(bookId, ch) {
+    const b = books.find(x => x.id === bookId)
+    if (!b) return
+    const total = b.total_chapters || 0
+    const next = Math.max(0, Math.min(ch, total))
+    if (next === (b.current_chapter || 0)) return
+    await supabase.from('books').update({ current_chapter: next }).eq('id', bookId)
+    setBooks(prev => prev.map(x => x.id === bookId ? { ...x, current_chapter: next } : x))
+  }
+
+  async function setMyChapter(bookId, ch) {
+    if (!currentUser) return
+    const b = books.find(x => x.id === bookId)
+    if (!b) return
+    const total = b.total_chapters || 0
+    const next = Math.max(0, Math.min(ch, total))
+    if (next === (memberProgress[bookId] || 0)) return
+    setMemberProgress(prev => ({ ...prev, [bookId]: next }))
+    await supabase.from('member_progress').upsert({ member_id: currentUser.id, book_id: bookId, current_chapter: next, updated_at: new Date().toISOString() }, { onConflict: 'member_id,book_id' })
+  }
+
+  async function saveClubSettings() {
+    if (!club || !isHost) return
+    const themes = settingsThemes.split(',').map(t => t.trim()).filter(Boolean)
+    const { error } = await supabase.from('clubs').update({
+      name: settingsName.trim(),
+      description: settingsDesc.trim(),
+      tags: themes,
+    }).eq('id', id)
+    if (!error) {
+      setClub(prev => ({ ...prev, name: settingsName.trim(), description: settingsDesc.trim(), tags: themes }))
+      setSettingsSaved(true)
+      setTimeout(() => setSettingsSaved(false), 2500)
+    }
+  }
+
+  async function leaveClub() {
+    if (!currentUser) return
+    await supabase.from('club_members').delete()
+      .eq('club_id', id).eq('member_id', currentUser.id)
+    router.push('/')
+  }
+
+  async function copyInviteLink() {
+    const link = `${window.location.origin}/join/${club.invite_code}`
+    try { await navigator.clipboard.writeText(link) } catch { }
+    setInviteCopied(true)
+    setTimeout(() => setInviteCopied(false), 2000)
+  }
+
+  const isLiked = pid => currentUser && likes.some(l => l.post_id === pid && l.member_id === currentUser.id)
+  const likeCount = pid => likes.filter(l => l.post_id === pid).length
+  const parseThemes = str => (str || '').split(',').map(t => t.trim()).filter(Boolean)
+
+  const openThread = t => { setActiveThread(t); setView('thread'); setReplyingTo(null); setExpandedReplies({}); loadThreadPosts(t.id) }
+  const openProfile = async m => {
+    setProfileMember(m); setView('profile'); setProfileReplyCount(0)
+    const { count } = await supabase.from('thread_replies').select('id', { count: 'exact', head: true }).eq('member_id', m.id)
+    setProfileReplyCount(count || 0)
+  }
+
+  function openEditProfile() {
+    if (!currentUser) return
+    setEditForm({
+      fav_book: currentUser.fav_book || '',
+      fav_book_author: currentUser.fav_book_author || '',
+      one_word: currentUser.one_word || '',
+      fav_cartoon: currentUser.fav_cartoon || '',
+    })
+    setShowEditProfile(true)
+  }
+
+  async function saveProfile() {
+    if (!currentUser) return
+    const upd = {
+      fav_book: editForm.fav_book.trim() || null,
+      fav_book_author: editForm.fav_book_author.trim() || null,
+      one_word: editForm.one_word.trim() || null,
+      fav_cartoon: editForm.fav_cartoon.trim() || null,
+    }
+    const { error } = await supabase.from('members').update(upd).eq('id', currentUser.id)
+    if (error) return
+    setCurrentUser(prev => ({ ...prev, ...upd }))
+    setProfileMember(prev => (prev && prev.id === currentUser.id) ? { ...prev, ...upd } : prev)
+    setMembers(prev => prev.map(m => m.id === currentUser.id ? { ...m, ...upd } : m))
+    setShowEditProfile(false)
+  }
+
+  // Turn "@Name" into a clickable link when it matches a club member.
   function renderContent(text) {
     if (!text) return text
-    const roster = rosterRef.current || []
-    return String(text).split(/(@[A-Za-z0-9_]+)/g).map((part, i) => {
+    return text.split(/(@[A-Za-z0-9_]+)/g).map((part, i) => {
       if (part[0] !== '@') return part
       const h = part.slice(1).toLowerCase()
       const hClean = h.replace(/_/g, '')
-      const m = roster.find((mm) => {
+      const m = members.find(mm => {
         const fn = (mm.first_name || '').toLowerCase()
         const full = ((mm.first_name || '') + (mm.last_name || '')).toLowerCase()
         return h === fn || full === hClean || full === h
       })
       if (!m) return part
-      return (
-        <span
-          key={i}
-          onClick={(e) => { e.stopPropagation(); router.push(`/profile/${m.id}`) }}
-          style={{ color: 'var(--tc)', fontWeight: 600, cursor: 'pointer' }}
-        >
-          @{m.first_name}
-        </span>
-      )
+      return <span key={i} onClick={e => { e.stopPropagation(); openProfile(m) }} style={{ color: 'var(--tc)', fontWeight: 600, cursor: 'pointer' }}>@{m.first_name}</span>
     })
   }
 
-  async function leaveChat() {
-    if (!me) return
-    if (!window.confirm('Leave this chat? You can rejoin anytime — you stay a club member.')) return
-    setChatHidden(true) // optimistic
-    const { error } = await supabase
-      .from('club_members')
-      .update({ chat_hidden: true })
-      .eq('club_id', clubId)
-      .eq('member_id', me.id)
-    if (error) setChatHidden(false)
-  }
+  const currentMembership = memberships.find(m => m.member_id === currentUser?.id)
+  const muteVal = currentMembership?.muted_until
+  const isMuted = muteVal && new Date(muteVal) > new Date()
+  const isHost = currentMembership?.role === 'host' || club?.creator_id === currentUser?.id
+  const isMember = !!currentMembership
+  const profilePostCount = profileMember ? posts.filter(p => p.member_id === profileMember.id).length : 0
 
-  async function rejoinChat() {
-    if (!me) return
-    setChatHidden(false) // optimistic
-    const { error } = await supabase
-      .from('club_members')
-      .update({ chat_hidden: false })
-      .eq('club_id', clubId)
-      .eq('member_id', me.id)
-    if (error) setChatHidden(true)
-  }
+  const curBook = books.find(b => b.status === 'current') || books[0]
+  const activeBook = books.find(b => b.id === selBook) || curBook
+  const activeChapterThreads = threads.filter(t => activeBook && t.book_id === activeBook.id && t.chapter_number > 0)
+  const activeOpenThread = threads.find(t => activeBook && t.book_id === activeBook.id && t.chapter_number === 0)
+  const allFeedThemes = [...new Set(posts.flatMap(p => parseThemes(p.themes)))]
+  const filteredPosts = filterTheme ? posts.filter(p => (p.themes || '').toLowerCase().includes(filterTheme.toLowerCase())) : posts
+  const topLevelTP = threadPosts.filter(p => !p.parent_reply_id)
+  const tReplies = threadPosts.filter(p => p.parent_reply_id)
+  const getReplies = pid => tReplies.filter(r => r.parent_reply_id === pid)
+  const tThemes = [...new Set(topLevelTP.flatMap(p => parseThemes(p.themes)))]
 
-  async function send() {
-    const body = text.trim()
-    if (!body || sending || !me) return
-    setSending(true)
-    setText('')
-    const { data, error } = await supabase
-      .from('club_messages')
-      .insert({ club_id: clubId, member_id: me.id, content: body })
-      .select('id, content, created_at, member_id')
-      .single()
-    setSending(false)
-    if (error) { setText(body); return } // restore on failure
-    // Optimistic append; the realtime echo dedupes by id.
-    setMessages((prev) =>
-      prev.some((m) => m.id === data.id) ? prev : [...prev, { ...data, members: me }]
-    )
-    // Notify anyone @mentioned — same helper the feed and threads use. Fire-and-forget.
-    notifyMentions({
-      text: body,
-      members: rosterRef.current,
-      actorId: me.id,
-      link: `/club/${clubId}`,
-      preview: body.slice(0, 60),
-    })
-  }
+  const stepBtn = { width: 30, height: 30, borderRadius: 8, border: '1.5px solid var(--bd2)', background: 'var(--sf)', color: 'var(--ink)', fontFamily: 'var(--ui)', fontSize: 18, fontWeight: 700, lineHeight: 1, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }
 
-  async function remove(msg) {
-    const canDelete = isHost || msg.member_id === me?.id
-    if (!canDelete) return
-    const preview = msg.content.length > 80 ? msg.content.slice(0, 80) + '…' : msg.content
-    if (!window.confirm(`Delete this message?\n\n"${preview}"`)) return
-    setMessages((prev) => prev.filter((m) => m.id !== msg.id)) // optimistic
-    const { error } = await supabase.from('club_messages').delete().eq('id', msg.id)
-    if (error) setMessages((prev) => [...prev, msg].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)))
-  }
-
-  function onKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
-  }
-
-  if (!ready) {
-    return <div style={{ padding: 40, textAlign: 'center', color: 'var(--txM)', fontFamily: 'var(--ui)' }}>Loading chat…</div>
-  }
-  if (!me) {
-    return <div style={{ padding: 40, textAlign: 'center', color: 'var(--txM)', fontFamily: 'var(--ui)' }}>Sign in to join the chat.</div>
-  }
-  if (chatHidden) {
-    return (
-      <div style={{ padding: '48px 24px', textAlign: 'center' }}>
-        <div style={{ fontFamily: 'var(--hd)', fontSize: 20, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>You've left this chat</div>
-        <p style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txM)', marginBottom: 22 }}>You're still a club member — rejoin whenever you like.</p>
-        <button onClick={rejoinChat} style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 600, color: '#fff', background: 'var(--tc)', border: 'none', borderRadius: 12, padding: '10px 22px', cursor: 'pointer' }}>
-          Rejoin chat
-        </button>
-      </div>
-    )
-  }
+  if (!club) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontFamily: 'var(--ui)', color: 'var(--txD)' }}>Loading...</div></div>
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '60vh', minHeight: 380 }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: 6 }}>
-        <span role="button" onClick={leaveChat} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--txM)', cursor: 'pointer' }}>
-          Leave chat
-        </span>
-      </div>
-      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '8px 4px' }}>
-        {messages.length === 0 ? (
-          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 24px', textAlign: 'center' }}>
-            {rosterRef.current.length > 0 && (
-              <div style={{ display: 'flex', marginBottom: 18 }}>
-                {rosterRef.current.slice(0, 5).map((mm, i) => (
-                  <div key={mm.id} style={{ marginLeft: i ? -10 : 0 }}><Avatar member={mm} size={44} /></div>
+    <div style={{ minHeight: '100vh' }}>
+      <title>{club.name} — unscripted</title>
+
+      {/* ADD BOOK MODAL */}
+      {showAddBook && isHost && <div className="modal-overlay" onClick={() => setShowAddBook(false)}>
+        <div className="modal-box" onClick={e => e.stopPropagation()}>
+          <button className="modal-close" onClick={() => setShowAddBook(false)}>×</button>
+          <h2 className="modal-title" style={{ fontSize: 28 }}>Add a new book</h2>
+          <p className="modal-sub">This becomes the current read. Previous books move to completed.</p>
+          <div style={{ position: 'relative', marginBottom: 24 }}>
+            <label className="field-label">Search for a book</label>
+            <input className="field-input" style={{ marginBottom: 0 }} placeholder="Start typing a title..." value={bkQ} onChange={e => searchBook(e.target.value)} />
+            {(bkR.length > 0 || bkL) && <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 12, boxShadow: '0 12px 32px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 280, overflowY: 'auto', marginTop: 4 }}>
+              {bkL && <div style={{ padding: '16px 20px', fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>Searching...</div>}
+              {bkR.map((b, i) => <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }} onClick={() => { setNewBook(d => ({ ...d, title: b.title, author: b.author, isbn: null, book_key: null, source: 'openlibrary', tags: [] })); setBkQ(''); setBkR([]) }}>
+                {b.cover ? <img src={b.cover} style={{ width: 32, height: 44, borderRadius: 4, objectFit: 'cover' }} alt="" /> : <span style={{ fontSize: 20 }}>📖</span>}
+                <div><div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>{b.title}</div><div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.year ? ` · ${b.year}` : ''}</div></div>
+              </div>)}
+            </div>}
+          </div>
+          <button type="button" onClick={() => setShowIsbn(v => !v)} style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--tc)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', marginBottom: 20 }}>
+            {showIsbn ? 'Hide ISBN entry' : 'Can’t find it? Add by ISBN'}
+          </button>
+          {showIsbn && <div style={{ marginBottom: 24 }}>
+            <ManualBookAdd onResolve={b => {
+              setNewBook(d => ({ ...d, title: b.title, author: b.author, isbn: b.isbn, book_key: b.book_key, source: b.source, tags: b.tags || [] }))
+              setBkQ(''); setBkR([]); setShowIsbn(false)
+            }} />
+          </div>}
+          {newBook.title && <div style={{ background: 'var(--sf2)', borderRadius: 12, padding: '16px 20px', marginBottom: 24 }}>
+            <div style={{ fontFamily: 'var(--hd)', fontSize: 18, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{newBook.title}</div>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', marginBottom: 12 }}>{newBook.author}</div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--ink)', cursor: 'pointer', marginBottom: newBook.noCh ? 0 : 16 }}>
+              <input type="checkbox" checked={newBook.noCh} onChange={e => setNewBook(d => ({ ...d, noCh: e.target.checked }))} style={{ width: 18, height: 18, accentColor: 'var(--tc)' }} />No numbered chapters
+            </label>
+            {!newBook.noCh && <div style={{ marginTop: 16 }}><label className="field-label">How many chapters?</label><input className="field-input" style={{ marginBottom: 0 }} type="number" placeholder="e.g. 12" value={newBook.chapters} onChange={e => setNewBook(d => ({ ...d, chapters: e.target.value }))} /></div>}
+          </div>}
+          <button className="modal-submit" onClick={addBook}>Add book</button>
+        </div>
+      </div>}
+
+      {/* EDIT PROFILE MODAL */}
+      {showEditProfile && <div className="modal-overlay" onClick={() => setShowEditProfile(false)}>
+        <div className="modal-box" onClick={e => e.stopPropagation()}>
+          <button className="modal-close" onClick={() => setShowEditProfile(false)}>×</button>
+          <h2 className="modal-title" style={{ fontSize: 28 }}>Edit your profile</h2>
+          <p className="modal-sub">This is how every club sees you.</p>
+
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
+            <MemberAvatar member={currentUser} size={88} />
+          </div>
+
+          <label className="field-label">Favorite book</label>
+          <input className="field-input" value={editForm.fav_book} onChange={e => setEditForm(d => ({ ...d, fav_book: e.target.value }))} placeholder="A book that shaped you" />
+          <label className="field-label">Author</label>
+          <input className="field-input" value={editForm.fav_book_author} onChange={e => setEditForm(d => ({ ...d, fav_book_author: e.target.value }))} placeholder="Who wrote it" />
+          <label className="field-label">In one word</label>
+          <input className="field-input" value={editForm.one_word} onChange={e => setEditForm(d => ({ ...d, one_word: e.target.value }))} placeholder="Describe yourself as a reader" />
+          <label className="field-label">Cartoon character</label>
+          <input className="field-input" value={editForm.fav_cartoon} onChange={e => setEditForm(d => ({ ...d, fav_cartoon: e.target.value }))} placeholder="Your spirit character" />
+
+          <button className="modal-submit" onClick={saveProfile}>Save changes</button>
+        </div>
+      </div>}
+
+      {/* CLUB ACTION SHEET */}
+      {actionSheet && <div onClick={() => setActionSheet(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(26,31,46,0.4)', zIndex: 200, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+        <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 480, background: 'var(--sf)', borderRadius: '20px 20px 0 0', padding: '12px 12px 24px', boxShadow: '0 -8px 40px rgba(0,0,0,0.2)' }}>
+          <div style={{ width: 40, height: 4, borderRadius: 100, background: 'var(--bd2)', margin: '4px auto 12px' }} />
+          {actionSheet === 'main' ? <>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', padding: '4px 16px 10px' }}>{club.name}</div>
+            {isMuted
+              ? <SheetRow icon={'\uD83D\uDD14'} label="Unmute notifications" onClick={() => applyMute(null)} />
+              : <SheetRow icon={'\uD83D\uDD15'} label="Mute notifications" onClick={() => setActionSheet('mute')} />}
+            <SheetRow icon={'\u2713'} label="Mark feed as read" onClick={markFeedRead} />
+            {(isMember || isHost) && <SheetRow icon={'\u2699'} label="Club settings" onClick={() => { setView('settings'); setActionSheet(null) }} />}
+            <SheetRow icon={'\u21A9'} label="Leave club" danger onClick={() => { setView('settings'); setLeaveConfirm(true); setActionSheet(null) }} />
+          </> : <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 8px 10px' }}>
+              <button onClick={() => setActionSheet('main')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>← Back</button>
+              <span style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Mute {club.name} for…</span>
+            </div>
+            {MUTE_OPTS.map(([label, ms]) => <SheetRow key={label} label={label} onClick={() => applyMute(ms)} />)}
+          </>}
+        </div>
+      </div>}
+
+      <div className="shell">
+        {/* NAV */}
+        <nav className="topnav">
+          <div className="brand" onClick={() => router.push('/')}><Logo /></div>
+          <div className="nav-links">
+            <button className="nav-btn" onClick={() => router.push('/')}>Explore</button>
+            <button className="nav-btn active">{club.name}</button>
+            {currentUser ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <NotificationBell currentUser={currentUser} />
+                <div className="user-nav" onClick={() => openProfile(currentUser)}>
+                  <MemberAvatar member={currentUser} size={32} />
+                  <span className="user-nav-name">{currentUser.first_name}</span>
+                </div>
+                <button
+                  onClick={async () => { try { await supabase.auth.signOut({ scope: 'local' }) } catch (e) {} setCurrentUser(null); router.push('/') }}
+                  style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, letterSpacing: 1, color: 'var(--txD)', background: 'none', border: 'none', cursor: 'pointer', textTransform: 'uppercase' }}
+                >
+                  Log out
+                </button>
+              </div>
+            ) : (
+              <button className="join-btn" onClick={() => router.push('/login')}>Log in</button>
+            )}
+          </div>
+        </nav>
+
+        {/* CLUB HEADER */}
+        <div style={{ padding: '40px 0 0' }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+            <span className="tag" style={{ background: club.privacy === 'open' ? 'rgba(94,122,98,0.1)' : 'var(--tcD)', color: club.privacy === 'open' ? 'var(--sg)' : 'var(--tc)' }}>{club.privacy}</span>
+            {club.featured && <span className="tag" style={{ background: 'var(--tcD)', color: 'var(--tc)' }}>featured</span>}
+            {isMuted && <span className="tag" style={{ background: 'var(--sf2)', color: 'var(--txD)' }}>{'\uD83D\uDD15'} {muteLabel(muteVal)}</span>}
+            {(isMember || isHost) && <button onClick={() => setActionSheet('main')} aria-label="Club options" style={{ marginLeft: 'auto', fontFamily: 'var(--ui)', fontSize: 20, fontWeight: 700, lineHeight: 1, color: 'var(--txD)', background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 8, width: 36, height: 32, cursor: 'pointer' }}>⋯</button>}
+          </div>
+          <div style={{ fontFamily: 'var(--hd)', fontSize: 36, fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>{club.name}</div>
+          <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)' }}>{club.description}</div>
+          {club.tagline && <div style={{ fontFamily: 'var(--hd)', fontSize: 16, fontStyle: 'italic', color: 'var(--tc)', marginTop: 4 }}>{club.tagline}</div>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16, paddingBottom: 20, borderBottom: '1px solid var(--bd)' }}>
+            <div style={{ display: 'flex' }}>{members.slice(0, 6).map((m, i) => <div key={m.id} style={{ marginLeft: i ? -6 : 0 }}><MemberAvatar member={m} size={28} /></div>)}</div>
+            <span style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>{members.length} members</span>
+          </div>
+        </div>
+
+        {/* CLUB TABS */}
+        <div className="club-tab-nav" style={{ marginBottom: 32 }}>
+          {[
+            ['feed', 'Feed'],
+            ['disc', 'Bookshelf'],
+            ['members', 'Members'],
+            ...(isMember || isHost ? [['chat', 'Chat'], ['settings', 'Settings']] : []),
+          ].map(([k, l]) =>
+            <button key={k} className={`nav-btn ${view === k ? 'active' : ''}`} style={{ padding: '14px 24px' }} onClick={() => { setView(k); setActiveThread(null); setProfileMember(null) }}>
+              {l}
+              {k === 'chat' && view !== 'chat' && chatUnread > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18, marginLeft: 7, padding: '0 5px', borderRadius: 100, background: 'var(--tc)', color: '#FFF', fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, lineHeight: 1, verticalAlign: 'middle' }}>{chatUnread > 9 ? '9+' : chatUnread}</span>}
+            </button>
+          )}
+        </div>
+
+        {/* FEED */}
+        {view === 'feed' && <div className="main-grid" style={{ paddingBottom: 80 }}>
+          <div>
+            <div className="section-title" style={{ marginBottom: 20 }}>The Feed</div>
+            {isMember && currentMembership && !currentMembership.has_posted && <div style={{ background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 16, padding: '32px 28px', marginBottom: 24, textAlign: 'center' }}>
+              <div style={{ fontSize: 40, marginBottom: 14 }}>{'\u270D\uFE0F'}</div>
+              <div style={{ fontFamily: 'var(--hd)', fontSize: 22, fontWeight: 600, color: 'var(--ink)', marginBottom: 10 }}>Your first word</div>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', lineHeight: 1.6, maxWidth: 440, margin: '0 auto 22px' }}>Don't just read to consume. Share your thoughts, sit with ideas, and build your voice — this room is better with you in it.</div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button onClick={() => document.getElementById('feed-compose')?.focus()} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--tc)', border: 'none', borderRadius: 10, padding: '12px 22px', cursor: 'pointer' }}>Write your first post</button>
+                <button onClick={() => setShowHow(v => !v)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 10, padding: '12px 22px', cursor: 'pointer' }}>{showHow ? 'Hide' : 'See how it works'}</button>
+              </div>
+              {showHow && <div style={{ textAlign: 'left', marginTop: 24, borderTop: '1px solid var(--bd)', paddingTop: 20, display: 'grid', gap: 16 }}>
+                {[['\uD83D\uDCAC', 'Post to the feed', 'Quick thoughts, questions, or reactions your whole club sees.'], ['\uD83D\uDCD6', 'Join a chapter thread', 'Go deep chapter by chapter in the Bookshelf tab — spoiler-safe.'], ['\uD83D\uDD25', 'Build a streak', 'Posting or visiting each day grows your writing and reading streaks.']].map(([icon, h, d]) => (
+                  <div key={h} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                    <span style={{ fontSize: 20, flexShrink: 0 }}>{icon}</span>
+                    <div><div style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>{h}</div><div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', lineHeight: 1.5 }}>{d}</div></div>
+                  </div>
                 ))}
+              </div>}
+            </div>}
+            {allFeedThemes.length > 0 && <div className="theme-filter"><span className="section-title" style={{ marginRight: 8 }}>Themes</span><ThemePill t="All" active={!filterTheme} onClick={() => setFilterTheme(null)} />{allFeedThemes.map(t => <ThemePill key={t} t={t} active={filterTheme === t} onClick={() => setFilterTheme(filterTheme === t ? null : t)} />)}</div>}
+            {currentUser ? <div className="compose"><div className="compose-row"><MemberAvatar member={currentUser} size={36} /><textarea id="feed-compose" className="compose-input" placeholder="Say what's on your mind..." value={newPost} onChange={e => setNewPost(e.target.value)} rows={2} /></div><div className="compose-depth"><div className="compose-depth-label">Optional — add depth</div><div className="compose-depth-row"><span className="compose-depth-name">Sitting with</span><input className="compose-depth-input italic" placeholder="A line from the book..." value={newSit} onChange={e => setNewSit(e.target.value)} /></div><div className="compose-depth-row"><span className="compose-depth-name">Themes</span><input className="compose-depth-input" placeholder="survival, identity (comma separated)" value={newThemes} onChange={e => setNewThemes(e.target.value)} /></div></div><div className="compose-foot"><select className="tag-select" id="club-tag-select"><option value="community">Community</option><option value="reflection">Reflection</option><option value="book">Book</option></select><button className="share-btn" disabled={!newPost.trim()} onClick={submitPost}>Share</button></div></div> : <div className="compose compose-cta" onClick={() => router.push('/signup')}><p className="compose-placeholder">Join to share your thoughts...</p></div>}
+            {filteredPosts.map(p => { const m = p.member || {}; const th = parseThemes(p.themes); return <div key={p.id} className="feed-card"><div className="feed-header"><MemberAvatar member={m} size={32} /><div><span className="feed-name" onClick={() => openProfile(m)}>{m.first_name}</span><span className="feed-time">{timeAgo(p.created_at)}</span></div><span style={{ marginLeft: 'auto' }}><Tag tag={p.tag} /></span></div><div className="feed-body">{renderContent(p.content)}</div>{p.sitting_with && <div className="sitting-with"><div className="sitting-label">Sitting with</div><div className="sitting-text">"{p.sitting_with}"</div></div>}{th.length > 0 && <div className="theme-pills">{th.map(t => <ThemePill key={t} t={t} active={filterTheme === t} onClick={() => setFilterTheme(filterTheme === t ? null : t)} />)}</div>}<div className="feed-actions"><button className={`feed-action ${isLiked(p.id) ? 'liked' : ''}`} onClick={() => toggleLike(p.id)}>{isLiked(p.id) ? '\u2665' : '\u2661'} {likeCount(p.id)}</button></div></div> })}
+          </div>
+          <div className="sidebar">
+            {curBook && <div className="sidebar-section"><div className="sidebar-label">Currently Reading</div><div className="book-card" style={{ cursor: 'pointer' }} onClick={() => setView('disc')}><div className="book-card-inner" style={{ padding: 24 }}><div className="book-title" style={{ fontSize: 20 }}>{curBook.title}</div><div className="book-author" style={{ marginBottom: 12 }}>{curBook.author}</div><ChapterProgress book={curBook} /></div></div></div>}
+            <div className="sidebar-section"><div className="sidebar-label">Books ({books.length})</div>{books.map(b => <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 10, marginBottom: 6, cursor: 'pointer' }} onClick={() => { setSelBook(b.id); setView('disc') }}><span className="tag" style={{ background: b.status === 'current' ? 'var(--tcD)' : 'rgba(94,122,98,0.1)', color: b.status === 'current' ? 'var(--tc)' : 'var(--sg)' }}>{b.status === 'current' ? 'now' : 'done'}</span><div style={{ flex: 1 }}><span style={{ fontFamily: 'var(--hd)', fontSize: 13, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</span><ChapterProgress book={b} showLabel={false} compact /></div></div>)}{isHost && <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer', width: '100%', marginTop: 8 }} onClick={() => setShowAddBook(true)}>+ Add book</button>}</div>
+          </div>
+        </div>}
+
+        {/* BOOKSHELF / DISCUSSIONS */}
+        {view === 'disc' && <div style={{ paddingBottom: 80 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><div className="section-title">Bookshelf</div>{isHost && <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer' }} onClick={() => setShowAddBook(true)}>+ Add book</button>}</div>
+          <div className="shelf">{books.map(b => <div key={b.id} className={`shelf-item ${selBook === b.id ? 'active' : ''}`} onClick={() => { setSelBook(b.id); setDiscMode('chapters') }}><div className={`shelf-title ${selBook === b.id ? 'inv' : ''}`}>{b.title}</div><div className={`shelf-author ${selBook === b.id ? 'inv' : ''}`}>{b.author}</div><span className="tag" style={{ background: b.status === 'current' ? (selBook === b.id ? 'rgba(194,122,90,0.25)' : 'var(--tcD)') : (selBook === b.id ? 'rgba(94,122,98,0.25)' : 'rgba(94,122,98,0.1)'), color: b.status === 'current' ? 'var(--tc)' : 'var(--sg)', width: 'fit-content', marginTop: 4 }}>{b.status === 'current' ? 'Reading Now' : 'Completed'}</span><ChapterProgress book={b} /></div>)}</div>
+
+          {activeBook && <>
+            <div className="disc-header"><div className="disc-title">{activeBook.title}</div></div>
+            <div className="disc-meta">by {activeBook.author} · {activeChapterThreads.length} threads{activeOpenThread ? ' · Open discussion' : ''}</div>
+
+            {activeBook.total_chapters > 0 && <div style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '16px 20px', margin: '16px 0 24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Club progress</span>
+                {isHost && <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button style={stepBtn} aria-label="Previous chapter" onClick={() => setBookChapter(activeBook.id, (activeBook.current_chapter || 0) - 1)}>−</button>
+                  <span style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--ink)', minWidth: 74, textAlign: 'center' }}>Ch {Math.min(activeBook.current_chapter || 0, activeBook.total_chapters)} / {activeBook.total_chapters}</span>
+                  <button style={stepBtn} aria-label="Next chapter" onClick={() => setBookChapter(activeBook.id, (activeBook.current_chapter || 0) + 1)}>+</button>
+                </div>}
+              </div>
+              <ChapterProgress book={activeBook} showLabel={!isHost} />
+            </div>}
+
+            {currentUser && isMember && activeBook.total_chapters > 0 && <div style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '16px 20px', margin: '0 0 24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Your progress</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button style={stepBtn} aria-label="Back a chapter" onClick={() => setMyChapter(activeBook.id, (memberProgress[activeBook.id] || 0) - 1)}>−</button>
+                  <span style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--ink)', minWidth: 74, textAlign: 'center' }}>Ch {Math.min(memberProgress[activeBook.id] || 0, activeBook.total_chapters)} / {activeBook.total_chapters}</span>
+                  <button style={stepBtn} aria-label="Forward a chapter" onClick={() => setMyChapter(activeBook.id, (memberProgress[activeBook.id] || 0) + 1)}>+</button>
+                </div>
+              </div>
+              <ChapterProgress book={{ current_chapter: memberProgress[activeBook.id] || 0, total_chapters: activeBook.total_chapters }} showLabel={false} />
+            </div>}
+
+            {activeBook.status === 'completed' && activeOpenThread && <div className="mode-toggle"><button className={`mode-btn ${discMode === 'chapters' ? 'act' : ''}`} onClick={() => setDiscMode('chapters')}>By Chapter</button><button className={`mode-btn ${discMode === 'open' ? 'act' : ''}`} onClick={() => setDiscMode('open')}>Open Discussion</button></div>}
+
+            {/* Open Discussion always visible at top */}
+            {activeOpenThread && discMode === 'chapters' && <div className="open-card" style={{ marginBottom: 20 }} onClick={() => openThread(activeOpenThread)}><div className="open-card-row"><div className="open-icon">💬</div><div className="open-info"><div className="open-title">Open Discussion</div><div className="open-meta">Full conversation — no boundaries</div></div><span className="thread-arrow">→</span></div></div>}
+
+            {(discMode === 'chapters' || activeBook.status === 'current') && activeChapterThreads.map(t => <div className="thread-card-lg" key={t.id} onClick={() => openThread(t)}><div className={`thread-badge ${t.is_active ? 'hot' : ''}`}>{t.chapter_number}</div><div className="thread-info"><div className="thread-info-title">{t.title}</div><div className="thread-info-meta">Open for discussion</div></div><span className="thread-arrow">→</span></div>)}
+
+            {discMode === 'open' && activeOpenThread && <div className="open-card" onClick={() => openThread(activeOpenThread)}><div className="open-card-row"><div className="open-icon">💬</div><div className="open-info"><div className="open-title">{activeOpenThread.title}</div><div className="open-meta">All chapters · No spoiler walls</div></div><div className="open-enter">Enter</div></div><div className="open-desc">The full conversation — no chapter boundaries. Spoilers welcome.</div></div>}
+          </>}
+        </div>}
+
+        {/* CHAT */}
+        {view === 'chat' && (isMember || isHost) && <div style={{ paddingBottom: 80 }}>
+          <div className="section-title" style={{ marginBottom: 20 }}>Chat</div>
+          <ClubChat clubId={id} />
+        </div>}
+
+        {/* THREAD */}
+        {view === 'thread' && activeThread && <div style={{ paddingBottom: 80 }}>
+          <div className="thread-view-header">
+            <button className="thread-view-back" onClick={() => setView('disc')}>← Back to bookshelf</button>
+            <div className="thread-view-title">{activeThread.title}</div>
+            <div className="thread-view-meta">{topLevelTP.length} posts · {tReplies.length} replies</div>
+          </div>
+
+          {currentUser && <div className="thread-compose"><div className="compose-row"><MemberAvatar member={currentUser} size={36} /><textarea className="compose-input" placeholder={`Share your thoughts...`} value={threadNewPost} onChange={e => setThreadNewPost(e.target.value)} rows={2} /></div><div className="compose-depth"><div className="compose-depth-label">Optional — add depth</div><div className="compose-depth-row"><span className="compose-depth-name">Sitting with</span><input className="compose-depth-input italic" placeholder="A line from the book..." value={threadNewSit} onChange={e => setThreadNewSit(e.target.value)} /></div><div className="compose-depth-row"><span className="compose-depth-name">Themes</span><input className="compose-depth-input" placeholder="survival, identity" value={threadNewThemes} onChange={e => setThreadNewThemes(e.target.value)} /></div></div><div className="compose-foot"><button className="share-btn" disabled={!threadNewPost.trim()} onClick={submitThreadPost}>Post to thread</button></div></div>}
+
+          {tThemes.length > 0 && <div className="theme-filter">{tThemes.map(t => <ThemePill key={t} t={t} />)}</div>}
+
+          {topLevelTP.length > 0 ? topLevelTP.map(po => { const m = po.member || {}; const th = parseThemes(po.themes); const reps = getReplies(po.id); return <div key={po.id} style={{ marginBottom: 24 }}>
+            <div className="feed-card"><div className="feed-header"><MemberAvatar member={m} size={32} /><div><span className="feed-name" onClick={() => openProfile(m)}>{m.first_name}</span><span className="feed-time">{timeAgo(po.created_at)}</span></div></div><div className="feed-body">{renderContent(po.content)}</div>{po.sitting_with && <div className="sitting-with"><div className="sitting-label">Sitting with</div><div className="sitting-text">"{po.sitting_with}"</div></div>}{th.length > 0 && <div className="theme-pills">{th.map(t => <ThemePill key={t} t={t} />)}</div>}
+            <div className="feed-actions"><button className="feed-action" onClick={() => { setReplyingTo(replyingTo === po.id ? null : po.id); setReplyText('') }}>↩ Reply</button>{reps.length > 0 && <button className="feed-action" style={{ marginLeft: 'auto' }} onClick={() => setExpandedReplies(p => ({ ...p, [po.id]: !p[po.id] }))}>{expandedReplies[po.id] ? 'Hide' : 'Show'} {reps.length} {reps.length === 1 ? 'reply' : 'replies'}</button>}</div></div>
+
+            {replyingTo === po.id && currentUser && <div className="reply-compose"><div style={{ display: 'flex', gap: 12 }}><MemberAvatar member={currentUser} size={28} /><div style={{ flex: 1 }}><div className="reply-to-label">Replying to {m.first_name}</div><textarea className="reply-input" placeholder="Write your reply..." value={replyText} onChange={e => setReplyText(e.target.value)} autoFocus rows={2} /></div></div><div className="reply-actions"><button className="reply-cancel" onClick={() => setReplyingTo(null)}>Cancel</button><button className="reply-submit" style={{ opacity: replyText.trim() ? 1 : 0.4 }} onClick={() => submitReply(po.id)}>Reply</button></div></div>}
+
+            {(expandedReplies[po.id] || replyingTo === po.id) && reps.length > 0 && <div className="replies-list">{reps.map(r => { const rm = r.member || {}; return <div key={r.id} className="reply-card"><div className="reply-header"><MemberAvatar member={rm} size={24} /><span className="reply-name">{rm.first_name}</span><span className="reply-time">{timeAgo(r.created_at)}</span></div><div className="reply-body">{renderContent(r.content)}</div></div> })}</div>}
+          </div> }) : <div className="empty-state"><div className="empty-title">No posts yet</div><div className="empty-sub">Be the first to share your thoughts.</div></div>}
+        </div>}
+
+        {/* MEMBERS */}
+        {view === 'members' && <div style={{ paddingBottom: 80 }}>
+          <div className="section-title" style={{ marginBottom: 20 }}>Members ({members.length})</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
+            {members.map(m => <div key={m.id} className="feed-card" style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => openProfile(m)}>
+              <MemberAvatar member={m} size={52} />
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)', marginTop: 14 }}>{m.first_name} {m.last_name}</div>
+              
+            </div>)}
+          </div>
+        </div>}
+
+        {/* SETTINGS */}
+        {view === 'settings' && <div style={{ maxWidth: 560, paddingBottom: 80 }}>
+          <div className="section-title" style={{ marginBottom: 36 }}>Settings</div>
+
+          {/* ── SECTION 1: Club Info (host only) ─────────────────────── */}
+          {isHost && <div style={{ marginBottom: 40 }}>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 20, paddingBottom: 10, borderBottom: '1px solid var(--bd)' }}>Club Info</div>
+            <label className="field-label">Club Name</label>
+            <input className="field-input" value={settingsName} onChange={e => setSettingsName(e.target.value)} />
+            <label className="field-label">Description</label>
+            <textarea className="field-input" value={settingsDesc} onChange={e => setSettingsDesc(e.target.value)} rows={3} style={{ resize: 'vertical' }} />
+            <label className="field-label">Themes</label>
+            <input className="field-input" value={settingsThemes} onChange={e => setSettingsThemes(e.target.value)} placeholder="grief, identity, coming of age" />
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginTop: -12, marginBottom: 16, lineHeight: 1.5 }}>Comma-separated. Helps readers find this club by theme, not just name.</div>
+            <button
+              onClick={saveClubSettings}
+              style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: settingsSaved ? 'var(--sg)' : 'var(--ink)', border: 'none', borderRadius: 10, padding: '13px 28px', cursor: 'pointer', transition: 'background 0.2s' }}
+            >
+              {settingsSaved ? 'Saved ✓' : 'Save changes'}
+            </button>
+          </div>}
+
+          {/* ── SECTION 2: Privacy & Invite ──────────────────────────── */}
+          <div style={{ marginBottom: 40 }}>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 20, paddingBottom: 10, borderBottom: '1px solid var(--bd)' }}>Privacy & Invite</div>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
+              {['invite', 'open'].map(p => (
+                <div key={p}
+                  style={{ flex: 1, padding: '16px 20px', borderRadius: 12, border: club.privacy === p ? '2px solid var(--tc)' : '1.5px solid var(--bd)', background: club.privacy === p ? 'rgba(194,122,90,0.04)' : 'var(--sf)', cursor: isHost ? 'pointer' : 'default', textAlign: 'center', opacity: isHost ? 1 : 0.7 }}
+                  onClick={async () => {
+                    if (!isHost) return
+                    await supabase.from('clubs').update({ privacy: p }).eq('id', id)
+                    setClub(prev => ({ ...prev, privacy: p }))
+                  }}
+                >
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, color: 'var(--ink)', marginBottom: 4 }}>{p === 'invite' ? 'Invite Only' : 'Open'}</div>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{p === 'invite' ? 'Members join via link' : 'Anyone can find & join'}</div>
+                </div>
+              ))}
+            </div>
+            <label className="field-label">Invite Link</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1, padding: '14px 18px', background: 'var(--bg)', border: '1px solid var(--bd2)', borderRadius: 10, fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txM)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {typeof window !== 'undefined' ? window.location.origin : 'https://www.unscriptedbook.club'}/join/{club.invite_code}
+              </div>
+              <button
+                onClick={copyInviteLink}
+                style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: inviteCopied ? 'var(--sg)' : 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '12px 18px', cursor: 'pointer', flexShrink: 0, transition: 'color 0.2s', minWidth: 80 }}
+              >
+                {inviteCopied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+          </div>
+
+          {/* ── SECTION 3: Members (host only) ───────────────────────── */}
+          {isHost && <div style={{ marginBottom: 40 }}>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 20, paddingBottom: 10, borderBottom: '1px solid var(--bd)' }}>Members</div>
+            {members.filter(m => m.id !== currentUser?.id).map(m => (
+              <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--bd)' }}>
+                <MemberAvatar member={m} size={32} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>{m.first_name} {m.last_name}</div>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{memberships.find(ms => ms.member_id === m.id)?.role || 'member'}</div>
+                </div>
+                <button
+                  onClick={async () => {
+                    if (!confirm(`Remove ${m.first_name} from this club?`)) return
+                    await supabase.from('club_members').delete().eq('club_id', id).eq('member_id', m.id)
+                    loadClub()
+                  }}
+                  style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 600, color: 'var(--txD)', background: 'none', border: '1px solid var(--bd2)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer' }}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>}
+
+          {/* ── SECTION 4: Danger Zone ────────────────────────────────── */}
+          <div>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: '#A0603E', marginBottom: 20, paddingBottom: 10, borderBottom: '1px solid rgba(160,96,62,0.2)' }}>Danger Zone</div>
+            {!leaveConfirm ? (
+              <button
+                onClick={() => setLeaveConfirm(true)}
+                style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#A0603E', background: 'rgba(160,96,62,0.06)', border: '1.5px solid rgba(160,96,62,0.3)', borderRadius: 10, padding: '13px 24px', cursor: 'pointer', width: '100%' }}
+              >
+                Leave this club
+              </button>
+            ) : (
+              <div style={{ background: 'rgba(160,96,62,0.06)', border: '1.5px solid rgba(160,96,62,0.2)', borderRadius: 14, padding: '24px' }}>
+                <div style={{ fontFamily: 'var(--hd)', fontSize: 18, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>Are you sure?</div>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.6, marginBottom: 20 }}>
+                  Your posts will stay but you'll need a new invite to rejoin {club.name}.
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    onClick={leaveClub}
+                    style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: '#A0603E', border: 'none', borderRadius: 10, padding: '13px 24px', cursor: 'pointer', flex: 1 }}
+                  >
+                    Yes, leave club
+                  </button>
+                  <button
+                    onClick={() => setLeaveConfirm(false)}
+                    style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 10, padding: '13px 24px', cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
-            <div style={{ fontFamily: 'var(--hd)', fontSize: 22, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>Welcome to the chat</div>
-            <p style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txM)', maxWidth: 360, lineHeight: 1.5 }}>
-              This is the beginning of your club's chat. Say hello, react to what you're reading, or drop a half-formed thought.
-            </p>
           </div>
-        ) : (
-          messages.map((m) => {
-            const mem = m.members || memberCache.current.get(m.member_id)
-            const mine = m.member_id === me.id
-            const canDelete = isHost || mine
-            return (
-              <div key={m.id} style={{ display: 'flex', gap: 10, padding: '7px 6px', alignItems: 'flex-start' }}>
-                <div style={{
-                  flex: '0 0 auto', width: 34, height: 34, borderRadius: '50%',
-                  background: mem?.color || 'var(--tc)', color: '#fff',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700,
-                }}>
-                  {mem?.initials || '—'}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                    <span style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>
-                      {labelFor(mem)}
-                    </span>
-                    <span style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txM)' }}>{fmtTime(m.created_at)}</span>
-                    {canDelete && (
-                      <span
-                        role="button"
-                        aria-label="Delete message"
-                        onClick={() => remove(m)}
-                        style={{ marginLeft: 'auto', cursor: 'pointer', color: 'var(--txM)', fontSize: 12, padding: '0 4px' }}
-                      >
-                        ✕
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--ink)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.4 }}>
-                    {renderContent(m.content)}
-                  </div>
-                </div>
-              </div>
-            )
-          })
-        )}
-      </div>
+        </div>}
 
-      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', paddingTop: 10, borderTop: '1px solid var(--bd)' }}>
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKeyDown}
-          rows={1}
-          placeholder="Message the club…"
-          style={{
-            flex: 1, resize: 'none', maxHeight: 120, padding: '10px 12px',
-            fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--ink)',
-            background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 12, outline: 'none',
-          }}
-        />
-        <button
-          onClick={send}
-          disabled={sending || !text.trim()}
-          style={{
-            flex: '0 0 auto', padding: '10px 18px', cursor: text.trim() ? 'pointer' : 'default',
-            fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 600, color: '#fff',
-            background: text.trim() ? 'var(--tc)' : 'var(--bd2)', border: 'none', borderRadius: 12,
-          }}
-        >
-          Send
-        </button>
+        {/* PROFILE */}
+        {view === 'profile' && profileMember && <div style={{ paddingBottom: 80 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <button className="profile-back" onClick={() => setView('feed')}>← Back</button>
+            {profileMember.id === currentUser?.id && <button onClick={openEditProfile} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--tc)', background: 'var(--tcD)', border: '1.5px solid var(--tc)', borderRadius: 8, padding: '8px 16px', cursor: 'pointer' }}>Edit profile</button>}
+          </div>
+          <div className="profile-header"><MemberAvatar member={profileMember} size={88} /><div><div className="profile-name">{profileMember.first_name} {profileMember.last_name}</div><div className="profile-role">{profileMember.role || 'Member'}</div><div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', marginTop: 8 }}>{profilePostCount} {profilePostCount === 1 ? 'post' : 'posts'} \u00B7 {profileReplyCount} {profileReplyCount === 1 ? 'reply' : 'replies'}</div></div></div>
+          <StreakStats member={profileMember} />
+          {(profileMember.fav_book || profileMember.one_word || profileMember.fav_cartoon) ? <div className="bio-grid">
+            <div className="bio-card"><div className="bio-accent" style={{ background: 'var(--tc)' }} /><div className="bio-label">Favorite Book</div>{profileMember.fav_book ? <><div className="bio-book-title">{profileMember.fav_book}</div><div className="bio-book-author">{profileMember.fav_book_author}</div></> : <div className="bio-empty">Not shared yet</div>}</div>
+            <div className="bio-card"><div className="bio-accent" style={{ background: 'var(--sg)' }} /><div className="bio-label">In one word</div>{profileMember.one_word ? <div className="bio-word">{profileMember.one_word}</div> : <div className="bio-empty">Not shared yet</div>}</div>
+            <div className="bio-card"><div className="bio-accent" style={{ background: '#6B6590' }} /><div className="bio-label">Cartoon Character</div>{profileMember.fav_cartoon ? <div className="bio-cartoon">{profileMember.fav_cartoon}</div> : <div className="bio-empty">Not shared yet</div>}</div>
+          </div> : <div className="bio-empty-state"><div className="bio-empty-title">{profileMember.first_name} hasn't filled out their profile yet</div></div>}
+          <div className="section-title" style={{ marginBottom: 20 }}>Posts by {profileMember.first_name}</div>
+          {posts.filter(p => p.member_id === profileMember.id).map(p => { const th = parseThemes(p.themes); return <div key={p.id} className="feed-card"><div className="feed-header"><MemberAvatar member={profileMember} size={32} /><div><span className="feed-name">{profileMember.first_name}</span><span className="feed-time">{timeAgo(p.created_at)}</span></div><span style={{ marginLeft: 'auto' }}><Tag tag={p.tag} /></span></div><div className="feed-body">{renderContent(p.content)}</div>{p.sitting_with && <div className="sitting-with"><div className="sitting-label">Sitting with</div><div className="sitting-text">"{p.sitting_with}"</div></div>}{th.length > 0 && <div className="theme-pills">{th.map(t => <ThemePill key={t} t={t} />)}</div>}</div> })}
+          {posts.filter(p => p.member_id === profileMember.id).length === 0 && <div className="profile-no-posts">{profileMember.first_name} hasn't posted yet — but they're reading.</div>}
+        </div>}
       </div>
     </div>
   )
