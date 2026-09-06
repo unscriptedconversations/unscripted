@@ -357,7 +357,7 @@ export default function Landing() {
               Forty women locked in an underground cage. No memory of why. When the guards vanish, they walk into an empty earth — and the youngest among them becomes their guide.
             </div>
             <div style={{ display: 'flex', gap: 12 }}>
-              <button className="join-btn" style={{ background: 'var(--tc)', color: 'var(--ink)' }}>Find a club reading this</button>
+              <button className="join-btn" style={{ background: 'var(--tc)', color: 'var(--ink)' }} onClick={() => router.push('/search?q=' + encodeURIComponent('I Who Have Never Known Men'))}>Find a club reading this</button>
               <button className="join-btn" style={{ background: 'none', border: '1.5px solid rgba(242,235,224,0.2)', color: '#F2EBE0' }} onClick={() => router.push(currentUser ? '/create' : '/signup')}>Start your own</button>
             </div>
           </div>
