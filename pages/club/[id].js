@@ -170,6 +170,7 @@ export default function ClubPage() {
   const [inviteCopied, setInviteCopied] = useState(false)
   const [profileReplyCount, setProfileReplyCount] = useState(0)
   const [showHow, setShowHow] = useState(false)
+  const [showSharePrompt, setShowSharePrompt] = useState(false)
   const [actionSheet, setActionSheet] = useState(null)
   const [memberProgress, setMemberProgress] = useState({})
   const [showEditProfile, setShowEditProfile] = useState(false)
@@ -445,6 +446,26 @@ export default function ClubPage() {
     setTimeout(() => setInviteCopied(false), 2000)
   }
 
+  // Post-creation share prompt: shows once when arriving from ?created=1.
+  useEffect(() => {
+    if (router.query.created === '1' && club) setShowSharePrompt(true)
+  }, [router.query.created, club])
+  function dismissSharePrompt() {
+    setShowSharePrompt(false)
+    router.replace(`/club/${id}`, undefined, { shallow: true })
+  }
+  const shareInviteLink = () => `${window.location.origin}/join/${club?.invite_code}`
+  function shareByEmail() {
+    const subject = encodeURIComponent('Join my book club on unscripted')
+    const body = encodeURIComponent(`I started "${club?.name}" on unscripted — come read with me:\n\n${shareInviteLink()}`)
+    window.location.href = `mailto:?subject=${subject}&body=${body}`
+  }
+  function shareByText() {
+    const body = encodeURIComponent(`I started "${club?.name}" on unscripted — come read with me: ${shareInviteLink()}`)
+    window.location.href = `sms:?&body=${body}`
+  }
+  const sharePromptBtn = { fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '10px 16px', cursor: 'pointer' }
+
   const isLiked = pid => currentUser && likes.some(l => l.post_id === pid && l.member_id === currentUser.id)
   const likeCount = pid => likes.filter(l => l.post_id === pid).length
   const parseThemes = str => (str || '').split(',').map(t => t.trim()).filter(Boolean)
@@ -673,6 +694,16 @@ export default function ClubPage() {
         {view === 'feed' && <div className="main-grid" style={{ paddingBottom: 80 }}>
           <div>
             <div className="section-title" style={{ marginBottom: 20 }}>The Feed</div>
+            {showSharePrompt && <div style={{ position: 'relative', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '18px 20px 16px', marginBottom: 20 }}>
+              <button onClick={dismissSharePrompt} aria-label="Dismiss" style={{ position: 'absolute', top: 8, right: 12, background: 'none', border: 'none', color: 'var(--txD)', fontSize: 20, lineHeight: 1, cursor: 'pointer' }}>×</button>
+              <div style={{ fontFamily: 'var(--hd)', fontSize: 17, fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>Your club is live — invite a few readers</div>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.5, marginBottom: 14 }}>Clubs are better with company. Send the invite to a friend or two.</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={shareByEmail} style={sharePromptBtn}>✉️ Email</button>
+                <button onClick={shareByText} style={sharePromptBtn}>💬 Text</button>
+                <button onClick={copyInviteLink} style={{ ...sharePromptBtn, color: inviteCopied ? 'var(--sg)' : 'var(--ink)' }}>{inviteCopied ? '✓ Copied!' : '🔗 Copy link'}</button>
+              </div>
+            </div>}
             {isMember && currentMembership && !currentMembership.has_posted && <div style={{ background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 16, padding: '32px 28px', marginBottom: 24, textAlign: 'center' }}>
               <div style={{ fontSize: 40, marginBottom: 14 }}>{'\u270D\uFE0F'}</div>
               <div style={{ fontFamily: 'var(--hd)', fontSize: 22, fontWeight: 600, color: 'var(--ink)', marginBottom: 10 }}>Your first word</div>
