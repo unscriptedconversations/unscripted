@@ -183,13 +183,13 @@ export default function ClubPage() {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) return
       const { data: member } = await supabase
-        .from('members').select('*').eq('auth_id', session.user.id).maybeSingle()
+        .from('members').select('*').eq('id', session.user.id).maybeSingle()
       if (member) setCurrentUser(member)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session) {
         const { data: member } = await supabase
-          .from('members').select('*').eq('auth_id', session.user.id).maybeSingle()
+          .from('members').select('*').eq('id', session.user.id).maybeSingle()
         if (member) setCurrentUser(member)
       } else {
         setCurrentUser(null)
