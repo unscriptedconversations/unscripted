@@ -124,7 +124,7 @@ export default function CreateClub() {
       }
     }
 
-    router.push(`/club/${club.id}`)
+    router.push(`/club/${club.id}?created=1`)
   }
 
   const fl = { fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2.5, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 10, display: 'block' }
