@@ -18,8 +18,56 @@ let mTimer
 // /search). Module-scoped like the timers, so it persists for the tab.
 let olSeq = 0
 
+// Homepage Spotlight carousel — three hand-curated slides, rotated every few
+// seconds. Swap these each cycle: [0] Book of the Month, [1] featured club,
+// [2] featured author. `to` drives each CTA:
+//   { search: '...' } -> /search?q=...   { href: '/club/ID' } -> that path
+//   { create: true }  -> /create (or /signup if logged out)
+const SPOTLIGHT_SLIDES = [
+  {
+    kicker: 'Book of the Month',
+    title: 'I Who Have Never Known Men',
+    subtitle: 'Jacqueline Harpman',
+    blurb: 'Forty women locked in an underground cage. No memory of why. When the guards vanish, they walk into an empty earth — and the youngest among them becomes their guide.',
+    ctas: [
+      { label: 'Find a club reading this', primary: true, to: { search: 'I Who Have Never Known Men' } },
+      { label: 'Start your own', primary: false, to: { create: true } },
+    ],
+  },
+  {
+    kicker: 'Club Spotlight',
+    title: 'REPLACE: Featured club name',
+    subtitle: 'Featured club',
+    blurb: 'REPLACE: a sentence about the club you want to feature this cycle — what it reads, who it is for, why to join.',
+    ctas: [
+      { label: 'View club', primary: true, to: { href: '/club/REPLACE_WITH_CLUB_ID' } },
+    ],
+  },
+  {
+    kicker: 'Author Spotlight',
+    title: 'REPLACE: Featured author name',
+    subtitle: 'REPLACE: e.g. Belgian novelist · 1929–2012',
+    blurb: 'REPLACE: a sentence about the author you want to feature this cycle — their voice, their themes, the book to start with.',
+    ctas: [
+      { label: 'Explore their books', primary: true, to: { search: 'REPLACE: Author name' } },
+    ],
+  },
+]
+
 export default function Landing() {
   const router = useRouter()
+  const [spot, setSpot] = useState(0)
+  const [spotPaused, setSpotPaused] = useState(false)
+  useEffect(() => {
+    if (spotPaused) return
+    const t = setTimeout(() => setSpot(s => (s + 1) % SPOTLIGHT_SLIDES.length), 3000)
+    return () => clearTimeout(t)
+  }, [spot, spotPaused])
+  function spotGo(to) {
+    if (to.search) return router.push('/search?q=' + encodeURIComponent(to.search))
+    if (to.create) return router.push(currentUser ? '/create' : '/signup')
+    if (to.href) return router.push(to.href)
+  }
   const [clubs, setClubs] = useState([])
   const [books, setBooks] = useState([])
   const [q, setQ] = useState('')
@@ -347,17 +395,26 @@ export default function Landing() {
         {/* SPOTLIGHT */}
         <section style={{ marginBottom: 48 }}>
           <div style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 20 }}>✦ Spotlight</div>
-          <div style={{ background: 'var(--ink)', borderRadius: 20, padding: '40px 48px', position: 'relative', overflow: 'hidden' }}>
+          <style>{`@keyframes spotlightFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+          <div onMouseEnter={() => setSpotPaused(true)} onMouseLeave={() => setSpotPaused(false)} style={{ background: 'var(--ink)', borderRadius: 20, padding: '40px 48px 46px', position: 'relative', overflow: 'hidden', minHeight: 264 }}>
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: 'linear-gradient(90deg, var(--tc), var(--sg))' }} />
-            <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--tc)', marginBottom: 16 }}>Book of the Month</div>
-            <div style={{ fontFamily: 'var(--hd)', fontSize: 32, fontWeight: 600, fontStyle: 'italic', color: '#F2EBE0', lineHeight: 1.15, marginBottom: 8 }}>I Who Have Never Known Men</div>
-            <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'rgba(242,235,224,0.5)', marginBottom: 20 }}>Jacqueline Harpman</div>
-            <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontStyle: 'italic', lineHeight: 1.7, color: 'rgba(242,235,224,0.6)', marginBottom: 24, maxWidth: 600 }}>
-              Forty women locked in an underground cage. No memory of why. When the guards vanish, they walk into an empty earth — and the youngest among them becomes their guide.
-            </div>
-            <div style={{ display: 'flex', gap: 12 }}>
-              <button className="join-btn" style={{ background: 'var(--tc)', color: 'var(--ink)' }} onClick={() => router.push('/search?q=' + encodeURIComponent('I Who Have Never Known Men'))}>Find a club reading this</button>
-              <button className="join-btn" style={{ background: 'none', border: '1.5px solid rgba(242,235,224,0.2)', color: '#F2EBE0' }} onClick={() => router.push(currentUser ? '/create' : '/signup')}>Start your own</button>
+            {(() => { const sl = SPOTLIGHT_SLIDES[spot]; return (
+              <div key={spot} style={{ animation: 'spotlightFade 500ms ease' }}>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--tc)', marginBottom: 16 }}>{sl.kicker}</div>
+                <div style={{ fontFamily: 'var(--hd)', fontSize: 32, fontWeight: 600, fontStyle: 'italic', color: '#F2EBE0', lineHeight: 1.15, marginBottom: 8 }}>{sl.title}</div>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'rgba(242,235,224,0.5)', marginBottom: 20 }}>{sl.subtitle}</div>
+                <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontStyle: 'italic', lineHeight: 1.7, color: 'rgba(242,235,224,0.6)', marginBottom: 24, maxWidth: 600 }}>{sl.blurb}</div>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  {sl.ctas.map((c, i) => (
+                    <button key={i} className="join-btn" onClick={() => spotGo(c.to)} style={c.primary ? { background: 'var(--tc)', color: 'var(--ink)' } : { background: 'none', border: '1.5px solid rgba(242,235,224,0.2)', color: '#F2EBE0' }}>{c.label}</button>
+                  ))}
+                </div>
+              </div>
+            ) })()}
+            <div style={{ position: 'absolute', bottom: 18, right: 24, display: 'flex', gap: 8 }}>
+              {SPOTLIGHT_SLIDES.map((_, i) => (
+                <button key={i} onClick={() => setSpot(i)} aria-label={`Go to slide ${i + 1}`} style={{ width: 8, height: 8, borderRadius: '50%', padding: 0, border: 'none', cursor: 'pointer', background: i === spot ? 'var(--tc)' : 'rgba(242,235,224,0.25)', transition: 'background 0.2s' }} />
+              ))}
             </div>
           </div>
         </section>
