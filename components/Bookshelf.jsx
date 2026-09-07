@@ -71,7 +71,7 @@ function Spine({ title, tokens, uid }) {
   )
 }
 
-export default function Bookshelf({ books = [], shelfLinks = {} }) {
+export default function Bookshelf({ books = [], shelfLinks = {}, onSelectBook }) {
   const router = useRouter()
   const [hover, setHover] = useState(-1)
 
@@ -80,7 +80,7 @@ export default function Bookshelf({ books = [], shelfLinks = {} }) {
       <div>
         <div style={{ height: 132, background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '0 24px' }}>
           <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.6 }}>
-            No finished books yet.<br />Mark a book as <strong style={{ color: 'var(--ink)' }}>Read</strong> and it lands on your shelf.
+            No books on your shelf yet.<br />Mark a book as <strong style={{ color: 'var(--ink)' }}>Reading</strong> or <strong style={{ color: 'var(--ink)' }}>Read</strong> and it lands here.
           </div>
         </div>
         <Ledge />
@@ -95,17 +95,18 @@ export default function Bookshelf({ books = [], shelfLinks = {} }) {
           {books.map((b, i) => {
             const href = spineHref(b, shelfLinks)
             const tokens = bookSpine(b.title)
+            const clickable = !!onSelectBook || !!href
             return (
               <div
                 key={(b.book_key || b.title) + i}
-                onClick={() => href && router.push(href)}
+                onClick={() => onSelectBook ? onSelectBook(b) : (href && router.push(href))}
                 onMouseEnter={() => setHover(i)}
                 onMouseLeave={() => setHover(-1)}
-                role={href ? 'button' : undefined}
-                aria-label={href ? `Open ${b.title}` : b.title}
+                role={clickable ? 'button' : undefined}
+                aria-label={onSelectBook ? `Annotate ${b.title}` : (href ? `Open ${b.title}` : b.title)}
                 title={b.author ? `${b.title} — ${b.author}` : b.title}
                 style={{
-                  cursor: href ? 'pointer' : 'default',
+                  cursor: clickable ? 'pointer' : 'default',
                   transform: hover === i ? 'translateY(-8px)' : 'none',
                   transition: 'transform 160ms ease',
                   filter: hover === i ? 'drop-shadow(0 8px 10px rgba(0,0,0,0.28))' : 'drop-shadow(0 3px 4px rgba(0,0,0,0.22))',
