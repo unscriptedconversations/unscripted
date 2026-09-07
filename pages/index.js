@@ -35,21 +35,23 @@ const SPOTLIGHT_SLIDES = [
     ],
   },
   {
+    // Fallback shown only if there are no clubs yet; otherwise this slide is
+    // replaced at render by your `featured` club (or the most recent one).
     kicker: 'Club Spotlight',
-    title: 'REPLACE: Featured club name',
+    title: 'Start the first club',
     subtitle: 'Featured club',
-    blurb: 'REPLACE: a sentence about the club you want to feature this cycle — what it reads, who it is for, why to join.',
+    blurb: 'Be the first to open a reading group on unscripted — pick a book, set the pace, and invite a few readers.',
     ctas: [
-      { label: 'View club', primary: true, to: { href: '/club/REPLACE_WITH_CLUB_ID' } },
+      { label: 'Start a club', primary: true, to: { create: true } },
     ],
   },
   {
     kicker: 'Author Spotlight',
-    title: 'REPLACE: Featured author name',
-    subtitle: 'REPLACE: e.g. Belgian novelist · 1929–2012',
-    blurb: 'REPLACE: a sentence about the author you want to feature this cycle — their voice, their themes, the book to start with.',
+    title: 'Octavia E. Butler',
+    subtitle: 'American speculative-fiction pioneer · 1947–2006',
+    blurb: 'A trailblazer of Afrofuturism who bent science fiction toward race, power, and survival — from the time-slip of Kindred to the scorched prophecy of Parable of the Sower.',
     ctas: [
-      { label: 'Explore their books', primary: true, to: { search: 'REPLACE: Author name' } },
+      { label: 'Explore their books', primary: true, to: { search: 'Octavia E. Butler' } },
     ],
   },
 ]
@@ -248,6 +250,20 @@ export default function Landing() {
   }
 
   const featuredClubs = clubs.filter(c => c.featured)
+  // Club Spotlight slide: your `featured` club (manual control via the flag),
+  // else the most recent club. Falls back to the static slide if none exist.
+  const spotlightClub = clubs.find(c => c.featured) || clubs[0]
+  const spotlightSlides = SPOTLIGHT_SLIDES.map((sl, i) => (
+    i === 1 && spotlightClub
+      ? {
+          kicker: 'Club Spotlight',
+          title: spotlightClub.name,
+          subtitle: 'Featured club',
+          blurb: spotlightClub.description || 'A reading group worth joining this month.',
+          ctas: [{ label: 'View club', primary: true, to: { href: `/club/${spotlightClub.id}` } }],
+        }
+      : sl
+  ))
   // Fallback: if no featured clubs, show top 3 by member count
   const featuredDisplay = featuredClubs.length > 0
     ? featuredClubs.slice(0, 3)
@@ -398,7 +414,7 @@ export default function Landing() {
           <style>{`@keyframes spotlightFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }`}</style>
           <div onMouseEnter={() => setSpotPaused(true)} onMouseLeave={() => setSpotPaused(false)} style={{ background: 'var(--ink)', borderRadius: 20, padding: '40px 48px 46px', position: 'relative', overflow: 'hidden', minHeight: 264 }}>
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: 'linear-gradient(90deg, var(--tc), var(--sg))' }} />
-            {(() => { const sl = SPOTLIGHT_SLIDES[spot]; return (
+            {(() => { const sl = spotlightSlides[spot]; return (
               <div key={spot} style={{ animation: 'spotlightFade 500ms ease' }}>
                 <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--tc)', marginBottom: 16 }}>{sl.kicker}</div>
                 <div style={{ fontFamily: 'var(--hd)', fontSize: 32, fontWeight: 600, fontStyle: 'italic', color: '#F2EBE0', lineHeight: 1.15, marginBottom: 8 }}>{sl.title}</div>
@@ -412,7 +428,7 @@ export default function Landing() {
               </div>
             ) })()}
             <div style={{ position: 'absolute', bottom: 18, right: 24, display: 'flex', gap: 8 }}>
-              {SPOTLIGHT_SLIDES.map((_, i) => (
+              {spotlightSlides.map((_, i) => (
                 <button key={i} onClick={() => setSpot(i)} aria-label={`Go to slide ${i + 1}`} style={{ width: 8, height: 8, borderRadius: '50%', padding: 0, border: 'none', cursor: 'pointer', background: i === spot ? 'var(--tc)' : 'rgba(242,235,224,0.25)', transition: 'background 0.2s' }} />
               ))}
             </div>
