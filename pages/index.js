@@ -220,7 +220,6 @@ export default function Landing() {
             {BRIDGE_ENABLED && <button className="nav-btn" onClick={() => router.push('/bridge')}>Bridge</button>}
             {currentUser ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <button className="nav-btn" onClick={() => router.push('/create')}>+ Club</button>
                 <NotificationBell currentUser={currentUser} />
                 <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
                   <span className="user-nav-name">{currentUser.first_name}</span>
