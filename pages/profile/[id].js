@@ -59,6 +59,12 @@ export default function ProfilePage() {
   const [churnReasons, setChurnReasons] = useState([])
   const [churnNotes, setChurnNotes] = useState('')
   const [busy, setBusy] = useState(false)
+  const [annoBook, setAnnoBook] = useState(null)
+  const [annoList, setAnnoList] = useState([])
+  const [annoLoading, setAnnoLoading] = useState(false)
+  const [annoNote, setAnnoNote] = useState('')
+  const [annoPassage, setAnnoPassage] = useState('')
+  const [annoSaving, setAnnoSaving] = useState(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -168,6 +174,34 @@ export default function ProfilePage() {
     setClubs(cs => cs.map(c => c.id === clubId ? { ...c, pinned: next } : c).sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)))
     await supabase.from('club_members').update({ pinned: next }).eq('club_id', clubId).eq('member_id', currentUser.id)
   }
+
+  async function openAnnotations(book) {
+    setAnnoBook(book); setAnnoNote(''); setAnnoPassage(''); setAnnoList([]); setAnnoLoading(true)
+    let q = supabase.from('annotations').select('*').eq('member_id', currentUser.id).order('created_at', { ascending: false })
+    q = book.book_key ? q.eq('book_key', book.book_key) : q.eq('book_title', book.title)
+    const { data } = await q
+    setAnnoList(data || []); setAnnoLoading(false)
+  }
+  function closeAnnotations() { setAnnoBook(null); setAnnoNote(''); setAnnoPassage('') }
+  async function addAnnotation() {
+    const note = annoNote.trim()
+    if (!note || !annoBook || !currentUser) return
+    setAnnoSaving(true)
+    const { data } = await supabase.from('annotations').insert({
+      member_id: currentUser.id,
+      book_key: annoBook.book_key || null,
+      book_title: annoBook.title,
+      book_author: annoBook.author || null,
+      passage: annoPassage.trim() || null,
+      note,
+    }).select().single()
+    if (data) { setAnnoList(l => [data, ...l]); setAnnoNote(''); setAnnoPassage('') }
+    setAnnoSaving(false)
+  }
+  async function deleteAnnotation(aid) {
+    await supabase.from('annotations').delete().eq('id', aid)
+    setAnnoList(l => l.filter(a => a.id !== aid))
+  }
   const published = writings.filter(w => w.is_published)
   const drafts = writings.filter(w => !w.is_published)
 
@@ -203,10 +237,10 @@ export default function ProfilePage() {
 
         <div style={{ marginBottom: 32 }} />
 
-        {(isOwner || shelfItems.some(s => s.status === 'read')) && (
+        {(isOwner || shelfItems.some(s => s.status === 'read' || s.status === 'reading')) && (
           <div style={{ marginBottom: 36 }}>
             <div style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 14 }}>Bookshelf</div>
-            <Bookshelf books={shelfItems.filter(s => s.status === 'read')} shelfLinks={shelfLinks} />
+            <Bookshelf books={shelfItems.filter(s => s.status === 'read' || s.status === 'reading')} shelfLinks={shelfLinks} onSelectBook={isOwner ? openAnnotations : undefined} />
           </div>
         )}
 
@@ -299,6 +333,38 @@ export default function ProfilePage() {
               {isOwner && <button onClick={e => { e.stopPropagation(); togglePin(c.id, !c.pinned) }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, opacity: c.pinned ? 1 : 0.35, flexShrink: 0 }} aria-label={c.pinned ? 'Unpin' : 'Pin'}>📌</button>}
             </div>
           )) : <><div style={{ fontFamily: 'var(--hd)', fontSize: 16, fontStyle: 'italic', color: 'var(--txD)', padding: '24px 0' }}>Not in any clubs yet.</div><div style={{ marginTop: 16 }}><button style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 8, padding: '11px 20px', cursor: 'pointer' }} onClick={() => router.push('/create')}>Start a club</button></div></>}
+        {annoBook && <div onClick={closeAnnotations} style={{ position: 'fixed', inset: 0, background: 'rgba(26,31,46,0.5)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--sf)', borderRadius: 18, padding: '24px 22px', maxWidth: 520, width: '100%', maxHeight: '82vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 4 }}>
+              <div>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 4 }}>Annotations</div>
+                <div style={{ fontFamily: 'var(--hd)', fontSize: 20, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.2 }}>{annoBook.title}</div>
+                {annoBook.author && <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', marginTop: 2 }}>{annoBook.author}</div>}
+              </div>
+              <button onClick={closeAnnotations} aria-label="Close" style={{ background: 'none', border: 'none', color: 'var(--txD)', fontSize: 22, lineHeight: 1, cursor: 'pointer', flexShrink: 0 }}>×</button>
+            </div>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', lineHeight: 1.5, margin: '10px 0 18px' }}>Private to you — like writing in the margins. Add a note, and optionally the passage it refers to.</div>
+            <div style={{ borderTop: '1px solid var(--bd)', paddingTop: 16, marginBottom: 18 }}>
+              <textarea value={annoPassage} onChange={e => setAnnoPassage(e.target.value)} placeholder="Passage or quote (optional)" rows={2} style={{ width: '100%', fontFamily: 'var(--hd)', fontSize: 14, fontStyle: 'italic', color: 'var(--ink)', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 10, padding: '10px 12px', resize: 'vertical', boxSizing: 'border-box', marginBottom: 8 }} />
+              <textarea value={annoNote} onChange={e => setAnnoNote(e.target.value)} placeholder="Your note…" rows={3} style={{ width: '100%', fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--ink)', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 10, padding: '10px 12px', resize: 'vertical', boxSizing: 'border-box' }} />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                <button onClick={addAnnotation} disabled={!annoNote.trim() || annoSaving} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 8, padding: '11px 20px', cursor: 'pointer', opacity: (!annoNote.trim() || annoSaving) ? 0.5 : 1 }}>{annoSaving ? 'Saving…' : 'Add annotation'}</button>
+              </div>
+            </div>
+            {annoLoading ? <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', padding: '8px 0' }}>Loading…</div>
+              : annoList.length === 0 ? <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontStyle: 'italic', color: 'var(--txD)', padding: '8px 0' }}>No annotations yet. Add your first margin note above.</div>
+              : <div style={{ display: 'grid', gap: 12 }}>
+                  {annoList.map(a => (
+                    <div key={a.id} style={{ background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 12, padding: '14px 16px', position: 'relative' }}>
+                      <button onClick={() => deleteAnnotation(a.id)} aria-label="Delete" style={{ position: 'absolute', top: 8, right: 10, background: 'none', border: 'none', color: 'var(--txD)', fontSize: 16, lineHeight: 1, cursor: 'pointer' }}>×</button>
+                      {a.passage && <div style={{ fontFamily: 'var(--hd)', fontSize: 14, fontStyle: 'italic', color: 'var(--ink)', borderLeft: '3px solid var(--tc)', paddingLeft: 12, marginBottom: 8, lineHeight: 1.5 }}>{a.passage}</div>}
+                      <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--ink)', lineHeight: 1.6, whiteSpace: 'pre-wrap', paddingRight: 16 }}>{a.note}</div>
+                      <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginTop: 8 }}>{new Date(a.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</div>
+                    </div>
+                  ))}
+                </div>}
+          </div>
+        </div>}
         </div>}
       </div>
     </div>
