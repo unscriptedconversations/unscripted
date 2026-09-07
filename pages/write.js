@@ -4,7 +4,6 @@ import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
 
 const FORMATS = [
-  { id: 'note', label: 'Note', desc: 'A quick thought' },
   { id: 'reflection', label: 'Reflection', desc: 'A few paragraphs' },
   { id: 'essay', label: 'Essay', desc: 'Long-form' },
 ]
