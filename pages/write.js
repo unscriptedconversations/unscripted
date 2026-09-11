@@ -3,8 +3,9 @@ import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
 
+const REFLECTION_MAX = 300
 const FORMATS = [
-  { id: 'reflection', label: 'Reflection', desc: 'A few paragraphs' },
+  { id: 'reflection', label: 'Reflection', desc: `A few paragraphs · up to ${REFLECTION_MAX} words` },
   { id: 'essay', label: 'Essay', desc: 'Long-form' },
 ]
 
@@ -94,6 +95,7 @@ export default function Write() {
 
   async function save(publish) {
     if (!currentUser || !title.trim() || !content.trim()) return
+    if (publish && format === 'reflection' && (content.trim() ? content.trim().split(/\s+/).length : 0) > REFLECTION_MAX) return
     setSaving(true)
     const tags = tagsInput.split(',').map(t => t.trim()).filter(Boolean)
     const payload = {
@@ -120,6 +122,9 @@ export default function Write() {
     setTimeout(() => setSaved(false), 2000)
     if (publish && savedId) router.push(`/writing/${savedId}`)
   }
+
+  const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0
+  const overLimit = format === 'reflection' && wordCount > REFLECTION_MAX
 
   const fl = { fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2.5, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 10, display: 'block' }
   const fi = { width: '100%', padding: '14px 18px', background: 'var(--bg)', border: '1px solid var(--bd2)', borderRadius: 10, fontFamily: 'var(--ui)', fontSize: 15, color: 'var(--ink)', outline: 'none', marginBottom: 24 }
@@ -174,6 +179,11 @@ export default function Write() {
           onChange={e => setContent(e.target.value)}
         />
 
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'baseline', gap: 8, margin: '10px 2px 20px' }}>
+          {overLimit && <span style={{ fontFamily: 'var(--ui)', fontSize: 12, color: '#A0603E', marginRight: 'auto', lineHeight: 1.4 }}>Reflections are capped at {REFLECTION_MAX} words — trim, or switch to Essay.</span>}
+          <span style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: overLimit ? '#A0603E' : 'var(--txD)', flexShrink: 0 }}>{wordCount}{format === 'reflection' ? ` / ${REFLECTION_MAX}` : ''} word{wordCount === 1 ? '' : 's'}</span>
+        </div>
+
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
           <label style={fl}>Themes (optional)</label>
           <button type="button" onClick={suggestThemes} disabled={suggesting} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, color: 'var(--tc)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', opacity: suggesting ? 0.5 : 1 }}>
@@ -193,7 +203,7 @@ export default function Write() {
 
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           <button style={btnO} disabled={saving} onClick={() => save(false)}>Save draft</button>
-          <button style={{ ...btn, flex: 1, opacity: title.trim() && content.trim() ? 1 : 0.4 }} disabled={saving || !title.trim() || !content.trim()} onClick={() => save(true)}>Publish</button>
+          <button style={{ ...btn, flex: 1, opacity: (title.trim() && content.trim() && !overLimit) ? 1 : 0.4 }} disabled={saving || !title.trim() || !content.trim() || overLimit} onClick={() => save(true)}>Publish</button>
         </div>
         {saved && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--sg)', marginTop: 12, textAlign: 'center' }}>Saved</div>}
       </div>
