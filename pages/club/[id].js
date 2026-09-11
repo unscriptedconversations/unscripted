@@ -166,6 +166,7 @@ export default function ClubPage() {
   const [settingsDesc, setSettingsDesc] = useState('')
   const [settingsThemes, setSettingsThemes] = useState('')
   const [settingsSaved, setSettingsSaved] = useState(false)
+  const [settingsMeeting, setSettingsMeeting] = useState('')
   const [leaveConfirm, setLeaveConfirm] = useState(false)
   const [inviteCopied, setInviteCopied] = useState(false)
   const [profileReplyCount, setProfileReplyCount] = useState(0)
@@ -273,7 +274,7 @@ export default function ClubPage() {
   async function loadClub() {
     const { data: c } = await supabase.from('clubs').select('*').eq('id', id).single()
     if (c) { setClub(c); setSettingsName(c.name || ''); setSettingsDesc(c.description || '')
-        setSettingsThemes((c.tags || []).join(', ')) }
+        setSettingsThemes((c.tags || []).join(', ')); setSettingsMeeting(c.meeting_url || '') }
     const { data: cm } = await supabase.from('club_members').select('*, member:members(*)').eq('club_id', id)
     if (cm) {
       setMembers(cm.map(x => x.member).filter(Boolean))
@@ -420,13 +421,15 @@ export default function ClubPage() {
   async function saveClubSettings() {
     if (!club || !isHost) return
     const themes = settingsThemes.split(',').map(t => t.trim()).filter(Boolean)
+    const meetingUrl = settingsMeeting.trim() || null
     const { error } = await supabase.from('clubs').update({
       name: settingsName.trim(),
       description: settingsDesc.trim(),
       tags: themes,
+      meeting_url: meetingUrl,
     }).eq('id', id)
     if (!error) {
-      setClub(prev => ({ ...prev, name: settingsName.trim(), description: settingsDesc.trim(), tags: themes }))
+      setClub(prev => ({ ...prev, name: settingsName.trim(), description: settingsDesc.trim(), tags: themes, meeting_url: meetingUrl }))
       setSettingsSaved(true)
       setTimeout(() => setSettingsSaved(false), 2500)
     }
@@ -526,6 +529,8 @@ export default function ClubPage() {
   const isMuted = muteVal && new Date(muteVal) > new Date()
   const isHost = currentMembership?.role === 'host' || club?.creator_id === currentUser?.id
   const isMember = !!currentMembership
+  const meetingUrl = (club?.meeting_url || '').trim()
+  const meetingProvider = /zoom\.(us|com)/i.test(meetingUrl) ? 'Zoom' : /teams\.(microsoft|live)/i.test(meetingUrl) ? 'Teams' : /meet\.google/i.test(meetingUrl) ? 'Google Meet' : 'video call'
   const profilePostCount = profileMember ? posts.filter(p => p.member_id === profileMember.id).length : 0
 
   const curBook = books.find(b => b.status === 'current') || books[0]
@@ -694,6 +699,14 @@ export default function ClubPage() {
         {view === 'feed' && <div className="main-grid" style={{ paddingBottom: 80 }}>
           <div>
             <div className="section-title" style={{ marginBottom: 20 }}>The Feed</div>
+            {meetingUrl && (isMember || isHost) && <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '16px 20px', marginBottom: 20 }}>
+              <div style={{ fontSize: 22, flexShrink: 0 }}>🎥</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Club meeting</div>
+                <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>Video meeting</div>
+              </div>
+              <a href={meetingUrl} target="_blank" rel="noopener noreferrer" style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--tc)', borderRadius: 8, padding: '11px 18px', textDecoration: 'none', flexShrink: 0 }}>{meetingProvider === 'video call' ? 'Join meeting' : 'Join on ' + meetingProvider} ↗</a>
+            </div>}
             {showSharePrompt && <div style={{ position: 'relative', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '18px 20px 16px', marginBottom: 20 }}>
               <button onClick={dismissSharePrompt} aria-label="Dismiss" style={{ position: 'absolute', top: 8, right: 12, background: 'none', border: 'none', color: 'var(--txD)', fontSize: 20, lineHeight: 1, cursor: 'pointer' }}>×</button>
               <div style={{ fontFamily: 'var(--hd)', fontSize: 17, fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>Your club is live — invite a few readers</div>
@@ -829,6 +842,13 @@ export default function ClubPage() {
             <label className="field-label">Themes</label>
             <input className="field-input" value={settingsThemes} onChange={e => setSettingsThemes(e.target.value)} placeholder="grief, identity, coming of age" />
             <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginTop: -12, marginBottom: 16, lineHeight: 1.5 }}>Comma-separated. Helps readers find this club by theme, not just name.</div>
+            <label className="field-label">Video meeting link</label>
+            <input className="field-input" value={settingsMeeting} onChange={e => setSettingsMeeting(e.target.value)} placeholder="Paste a Zoom, Teams, or Meet link" />
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: -8, marginBottom: 10 }}>
+              <button type="button" onClick={() => window.open('https://zoom.us/meeting/schedule', '_blank', 'noopener')} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, color: 'var(--tc)', background: 'var(--tcD)', border: '1px solid var(--tc)', borderRadius: 8, padding: '8px 14px', cursor: 'pointer' }}>New Zoom ↗</button>
+              <button type="button" onClick={() => window.open('https://teams.microsoft.com/l/meeting/new', '_blank', 'noopener')} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, color: 'var(--tc)', background: 'var(--tcD)', border: '1px solid var(--tc)', borderRadius: 8, padding: '8px 14px', cursor: 'pointer' }}>New Teams ↗</button>
+            </div>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginBottom: 16, lineHeight: 1.5 }}>Create a meeting in a new tab, then paste the invite link here. Members see a “Join” button on the club feed.</div>
             <button
               onClick={saveClubSettings}
               style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: settingsSaved ? 'var(--sg)' : 'var(--ink)', border: 'none', borderRadius: 10, padding: '13px 28px', cursor: 'pointer', transition: 'background 0.2s' }}
