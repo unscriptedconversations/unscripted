@@ -775,16 +775,17 @@ export default function Signup() {
             {/* Step 4 — Invite */}
             {step === 4 && (
               <div>
-                <div style={{ fontFamily: 'var(--hd)', fontSize: 28, fontWeight: 600, color: 'var(--ink)', marginBottom: 32 }}>Invite your people.</div>
-                <label style={fl}>Shareable Link</label>
-                <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-                  <div style={{ flex: 1, padding: '14px 18px', background: 'var(--bg)', border: '1px solid var(--bd2)', borderRadius: 10, fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txM)' }}>
-                    unscripted.club/join/{(clubData.name || 'your-club').toLowerCase().replace(/\s+/g, '-')}
-                  </div>
-                  <button style={{ ...btnO, width: 'auto', padding: '12px 18px' }}>Copy</button>
+                               <div style={{ fontFamily: 'var(--hd)', fontSize: 28, fontWeight: 600, color: 'var(--ink)', marginBottom: 12 }}>Invite your people.</div>
+                {/* The club row (and its invite_code) doesn't exist until createClub()
+                    runs on Launch, so there is no real link to show here yet. This step
+                    used to display a fake name-slug link on the wrong domain plus a
+                    dead Copy button and a dead email input. Real sharing — copy link,
+                    email, text, all against the actual invite_code — happens on the
+                    club page's ?created=1 share prompt, which finishAndRedirect sends
+                    new hosts to. */}
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', lineHeight: 1.7, marginBottom: 28 }}>
+                  Launch {clubData.name ? <span style={{ color: 'var(--ink)', fontWeight: 600 }}>{clubData.name}</span> : 'your club'} and we'll hand you the invite link straight away — ready to copy, email or text.
                 </div>
-                <label style={fl}>Invite by Email</label>
-                <input style={fi} placeholder="name@email.com, name@email.com" />
                 <div style={{ display: 'flex', gap: 12 }}>
                   <button style={btnO} onClick={() => setStep(3)}>Back</button>
                   <button
