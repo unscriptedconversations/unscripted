@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
 import Logo from '../../components/Logo'
+import { BRIDGE_ENABLED } from '../../lib/flags'
 
 export default function BookPage() {
   const router = useRouter()
@@ -206,7 +207,11 @@ export default function BookPage() {
           </div>
 
           {tags.length > 0 && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 24 }}>
-            {tags.slice(0, 5).map(t => <span key={t} onClick={() => router.push(`/bridge/theme/${encodeURIComponent(t)}`)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, color: 'var(--sg)', background: 'rgba(94,122,98,0.1)', borderRadius: 100, padding: '5px 14px', cursor: 'pointer' }}>{t}</span>)}
+            {/* Theme pills stay visible either way — they're the only place this page
+                shows the book's themes. They only navigate while Bridge is on; with
+                BRIDGE_ENABLED false they render inert rather than leading into a
+                switched-off pillar. */}
+            {tags.slice(0, 5).map(t => <span key={t} onClick={BRIDGE_ENABLED ? () => router.push(`/bridge/theme/${encodeURIComponent(t)}`) : undefined} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, color: 'var(--sg)', background: 'rgba(94,122,98,0.1)', borderRadius: 100, padding: '5px 14px', cursor: BRIDGE_ENABLED ? 'pointer' : 'default' }}>{t}</span>)}
           </div>}
 
           {/* ── STAT CARDS ───────────────────────────────────────── */}
@@ -249,7 +254,7 @@ export default function BookPage() {
           {/* ── BRIDGE (preserved) ───────────────────────────────── */}
           {shelfCounts && <div style={{ textAlign: 'center', margin: '-28px auto 36px', fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>{shelfCounts.total} reader{shelfCounts.total !== 1 ? 's' : ''} shelved this{shelfCounts.reading > 0 ? ` · ${shelfCounts.reading} reading now` : ''}</div>}
 
-          {book.title && <div style={{ background: 'var(--ink)', borderRadius: 14, padding: '20px 24px', marginBottom: 32, display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}
+          {BRIDGE_ENABLED && book.title && <div style={{ background: 'var(--ink)', borderRadius: 14, padding: '20px 24px', marginBottom: 32, display: 'flex', alignItems: 'center', gap: 16, cursor: 'pointer' }}
             onClick={() => router.push(`/bridge/book/${encodeURIComponent(book.title)}?author=${encodeURIComponent(book.author || '')}`)}>
             <span style={{ fontSize: 22 }}>↗</span>
             <div style={{ flex: 1 }}>
