@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../../lib/supabase'
 import Logo from '../../../components/Logo'
+import { BRIDGE_ENABLED } from '../../../lib/flags'
 
 function initialsFor(m) {
   if (m?.initials) return m.initials
@@ -39,6 +40,13 @@ export default function BridgeThemeThread() {
   const anchor = theme.toLowerCase().trim()
   const label = theme.charAt(0).toUpperCase() + theme.slice(1)
 
+  // Bridge is flag-gated. pages/bridge.js already redirects when the pillar
+  // is off; without the same guard here a typed or bookmarked deep link still
+  // rendered the disabled pillar (and ran its queries).
+  useEffect(() => {
+    if (!BRIDGE_ENABLED) { router.replace('/'); return }
+  }, [])
+
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) return
@@ -47,7 +55,7 @@ export default function BridgeThemeThread() {
     })
   }, [])
 
-  useEffect(() => { if (router.isReady && anchor) load() }, [router.isReady, anchor])
+  useEffect(() => { if (!BRIDGE_ENABLED) return; if (router.isReady && anchor) load() }, [router.isReady, anchor])
 
   async function load() {
     const { data: t } = await supabase.from('bridge_threads').select('*').eq('kind', 'theme').eq('anchor', anchor).maybeSingle()
@@ -107,6 +115,8 @@ export default function BridgeThemeThread() {
   }
 
   const chip = { fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--ink)', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 100, padding: '8px 14px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }
+
+  if (!BRIDGE_ENABLED) return null
 
   return (
     <div style={{ minHeight: '100vh' }}>
