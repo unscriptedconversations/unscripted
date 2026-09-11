@@ -282,12 +282,23 @@ export default function ClubPage() {
     }
     const { data: bk } = await supabase.from('books').select('*').eq('club_id', id).order('display_order')
     if (bk) { setBooks(bk); if (!selBook && bk[0]) setSelBook(bk[0].id) }
-    const { data: th } = await supabase.from('threads').select('*').order('chapter_number')
-    if (th) setThreads(th)
+        // Scope threads to THIS club's books. Previously selected the whole table and
+    // filtered client-side, which silently truncated at Supabase's 1000-row cap
+    // once the platform had enough threads.
+    const bookIds = (bk || []).map(b => b.id)
+    if (bookIds.length) {
+      const { data: th } = await supabase.from('threads').select('*').in('book_id', bookIds).order('chapter_number')
+      setThreads(th || [])
+    } else setThreads([])
     const { data: ps } = await supabase.from('posts').select('*, member:members(*)').eq('club_id', id).order('created_at', { ascending: false })
     if (ps) setPosts(ps)
-    const { data: lk } = await supabase.from('likes').select('*')
-    if (lk) setLikes(lk)
+    // Scope likes to the posts actually on this page — same 1000-row truncation
+    // problem, plus the whole-table payload grew on every club page load.
+    const postIds = (ps || []).map(p => p.id)
+    if (postIds.length) {
+      const { data: lk } = await supabase.from('likes').select('*').in('post_id', postIds)
+      setLikes(lk || [])
+    } else setLikes([])
   }
 
   async function loadThreadPosts(threadId) {
