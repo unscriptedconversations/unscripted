@@ -293,14 +293,20 @@ export default function Signup() {
   // Final redirect after interest prompt
   async function finishAndRedirect(userId) {
     await saveInterests(userId)
-    const { data: membership } = await supabase
+        const { data: membership } = await supabase
       .from('club_members')
-      .select('club_id')
+      .select('club_id, role')
       .eq('member_id', userId)
       .order('joined_at', { ascending: true })
       .limit(1)
       .single()
-    router.push(membership?.club_id ? `/club/${membership.club_id}` : '/')
+    if (!membership?.club_id) { router.push('/'); return }
+    // A brand-new host lands on the club page's share prompt (?created=1), which
+    // is where the real invite link lives — copy / email / text against the
+    // actual invite_code. Non-hosts just go to the club.
+    router.push(membership.role === 'host'
+      ? `/club/${membership.club_id}?created=1`
+      : `/club/${membership.club_id}`)
   }
 
 
