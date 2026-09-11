@@ -6,6 +6,7 @@ import Logo from '../../components/Logo'
 import NotificationBell from '../../components/NotificationBell'
 import Bookshelf from '../../components/Bookshelf'
 import { createNotification } from '../../lib/notify'
+import { olSearch } from '../../lib/olSearch'
 
 const COLORS = ['#8B6E52', '#5E7A62', '#C27A5A', '#6B6590', '#52708B', '#7A5278', '#8B7E52', '#8B5E5E', '#8B6E6E']
 
@@ -65,6 +66,11 @@ export default function ProfilePage() {
   const [annoNote, setAnnoNote] = useState('')
   const [annoPassage, setAnnoPassage] = useState('')
   const [annoSaving, setAnnoSaving] = useState(false)
+  const [showAddBook, setShowAddBook] = useState(false)
+  const [abQ, setAbQ] = useState('')
+  const [abR, setAbR] = useState([])
+  const [abSel, setAbSel] = useState(null)
+  const [abBusy, setAbBusy] = useState(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -96,6 +102,35 @@ export default function ProfilePage() {
       const map = {}; for (const b of (bk || [])) map[b.title] = b.id
       setShelfLinks(map)
     }
+  }
+
+  async function reloadShelf() {
+    const { data: sh } = await supabase.from('shelves').select('title, author, book_key, status').eq('member_id', id).order('created_at', { ascending: false })
+    setShelfItems(sh || [])
+    const titles = (sh || []).map(s => s.title)
+    if (titles.length) {
+      const { data: bk } = await supabase.from('books').select('id, title').in('title', titles)
+      const map = {}; for (const b of (bk || [])) map[b.title] = b.id
+      setShelfLinks(map)
+    }
+  }
+
+  async function searchBooks(v) {
+    setAbQ(v); setAbSel(null)
+    if (v.trim().length < 2) { setAbR([]); return }
+    try { setAbR(await olSearch(v)) } catch { setAbR([]) }
+  }
+
+  async function addToShelf(status) {
+    if (!abSel || !member || abBusy) return
+    setAbBusy(true)
+    await supabase.from('shelves').upsert(
+      { member_id: member.id, title: abSel.title, author: abSel.author || null, book_key: abSel.key || null, status },
+      { onConflict: 'member_id,title' }
+    )
+    await reloadShelf()
+    setAbBusy(false)
+    setShowAddBook(false); setAbQ(''); setAbR([]); setAbSel(null)
   }
 
   async function checkFollowing() {
@@ -239,8 +274,18 @@ export default function ProfilePage() {
 
         {(isOwner || shelfItems.some(s => s.status === 'read' || s.status === 'reading')) && (
           <div style={{ marginBottom: 36 }}>
-            <div style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 14 }}>Bookshelf</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Bookshelf</div>
+              {isOwner && <button onClick={() => setShowAddBook(true)} style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer' }}>+ Add book</button>}
+            </div>
             <Bookshelf books={shelfItems.filter(s => s.status === 'read' || s.status === 'reading')} shelfLinks={shelfLinks} onSelectBook={isOwner ? openAnnotations : undefined} />
+          </div>
+        )}
+
+        {shelfItems.some(s => s.status === 'want') && (
+          <div style={{ marginBottom: 36 }}>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 14 }}>Want to read</div>
+            <Bookshelf books={shelfItems.filter(s => s.status === 'want')} shelfLinks={shelfLinks} />
           </div>
         )}
 
@@ -363,6 +408,39 @@ export default function ProfilePage() {
                     </div>
                   ))}
                 </div>}
+          </div>
+        </div>}
+
+        {showAddBook && <div onClick={() => !abBusy && setShowAddBook(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(26,31,46,0.5)', zIndex: 200, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 24, overflowY: 'auto' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'var(--sf)', borderRadius: 18, padding: '24px 22px', maxWidth: 520, width: '100%', marginTop: '6vh', maxHeight: '82vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 4 }}>
+              <div>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 4 }}>Add to shelf</div>
+                <div style={{ fontFamily: 'var(--hd)', fontSize: 20, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.2 }}>Find a book</div>
+              </div>
+              <button onClick={() => setShowAddBook(false)} aria-label="Close" style={{ background: 'none', border: 'none', color: 'var(--txD)', fontSize: 22, lineHeight: 1, cursor: 'pointer', flexShrink: 0 }}>×</button>
+            </div>
+            <input autoFocus value={abQ} onChange={e => searchBooks(e.target.value)} placeholder="Search a title or author…" style={{ width: '100%', fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--ink)', background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 10, padding: '11px 13px', boxSizing: 'border-box', margin: '14px 0 12px' }} />
+            {abR.length > 0 && <div style={{ display: 'grid', gap: 6, marginBottom: 14 }}>
+              {abR.map((b, i) => (
+                <div key={(b.key || b.title) + i} onClick={() => setAbSel(b)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', borderRadius: 10, cursor: 'pointer', border: '1.5px solid ' + (abSel && (abSel.key || abSel.title) === (b.key || b.title) ? 'var(--tc)' : 'var(--bd)'), background: abSel && (abSel.key || abSel.title) === (b.key || b.title) ? 'rgba(194,122,90,0.06)' : 'var(--bg)' }}>
+                  {b.cover ? <img src={`https://covers.openlibrary.org/b/id/${b.cover}-S.jpg`} alt="" style={{ width: 34, height: 50, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }} /> : <div style={{ width: 34, height: 50, background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 3, flexShrink: 0 }} />}
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontFamily: 'var(--hd)', fontSize: 14, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.title}</div>
+                    {b.author && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.author}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>}
+            {abQ.trim().length >= 2 && abR.length === 0 && <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', padding: '4px 2px 14px' }}>No matches — try a different title.</div>}
+            {abSel && <div style={{ borderTop: '1px solid var(--bd)', paddingTop: 14 }}>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', marginBottom: 10 }}>Add <span style={{ fontStyle: 'italic', color: 'var(--ink)', fontWeight: 600 }}>{abSel.title}</span> as</div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {[['want', 'Want to read'], ['reading', 'Currently reading'], ['read', 'Read']].map(([s, l]) => (
+                  <button key={s} disabled={abBusy} onClick={() => addToShelf(s)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 8, padding: '11px 16px', cursor: abBusy ? 'default' : 'pointer', opacity: abBusy ? 0.5 : 1 }}>{l}</button>
+                ))}
+              </div>
+            </div>}
           </div>
         </div>}
         </div>}
