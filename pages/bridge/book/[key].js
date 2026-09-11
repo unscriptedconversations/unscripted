@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../../lib/supabase'
 import Logo from '../../../components/Logo'
+import { BRIDGE_ENABLED } from '../../../lib/flags'
 
 function initialsFor(m) {
   if (m?.initials) return m.initials
@@ -35,6 +36,13 @@ export default function BridgeBookThread() {
   const author = typeof router.query.author === 'string' ? router.query.author : ''
   const anchor = title.toLowerCase().trim()
 
+  // Bridge is flag-gated. pages/bridge.js already redirects when the pillar
+  // is off; without the same guard here a typed or bookmarked deep link still
+  // rendered the disabled pillar (and ran its queries).
+  useEffect(() => {
+    if (!BRIDGE_ENABLED) { router.replace('/'); return }
+  }, [])
+
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) return
@@ -43,10 +51,11 @@ export default function BridgeBookThread() {
     })
   }, [])
 
-  useEffect(() => { if (router.isReady && anchor) load() }, [router.isReady, anchor])
+  useEffect(() => { if (!BRIDGE_ENABLED) return; if (router.isReady && anchor) load() }, [router.isReady, anchor])
 
   // Once we know the user, find whether they read this book in one of their clubs
   useEffect(() => {
+    if (!BRIDGE_ENABLED) return
     if (!currentUser || !title) return
     supabase.from('books').select('club_id, club:clubs(name)').ilike('title', title).then(({ data }) => {
       if (!data || !data.length) return
@@ -98,6 +107,8 @@ export default function BridgeBookThread() {
   }
 
   const clubsRepresented = [...new Set(posts.map(p => p.club?.name).filter(Boolean))]
+
+  if (!BRIDGE_ENABLED) return null
 
   return (
     <div style={{ minHeight: '100vh' }}>
