@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
@@ -30,6 +30,12 @@ function AuthorLinks({ author, router }) {
 }
 
 const FORMAT_LABEL = { essay: 'Essay', reflection: 'Reflection', note: 'Note' }
+// Trending-searches log. Lowercase, trim, collapse spaces, cap at 60 chars —
+// must match the search_events_norm check constraint in the DB.
+function normalizeQuery(t) {
+  return (t || '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 60).trim()
+}
+
 const SectionLabel = ({ children }) => (
   <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', margin: '28px 0 12px' }}>{children}</div>
 )
@@ -48,16 +54,20 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(false)
   const [olLoading, setOlLoading] = useState(false)
   const [ran, setRan] = useState(false)
+  const lastLogged = useRef('')
 
   // Seed from ?q= (homepage "see all results" passes it through)
   useEffect(() => {
     if (!router.isReady) return
     const initial = typeof router.query.q === 'string' ? router.query.q : ''
-    if (initial) { setQ(initial); runSearch(initial) }
+    // Any ?src= (trending chip, homepage spotlight) is a curated link, not a
+    // typed search — don't log it, or trending would promote itself.
+    const curated = typeof router.query.src === 'string' && router.query.src !== ''
+    if (initial) { setQ(initial); runSearch(initial, { log: !curated }) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router.isReady])
 
-  async function runSearch(val) {
+  async function runSearch(val, { log = true } = {}) {
     const term = (val ?? q).trim()
     if (term.length < 2) return
     setLoading(true); setRan(true)
@@ -107,8 +117,27 @@ export default function SearchPage() {
     // Wider catalog (Open Library) via shared lib — cache is warmed across the
     // homepage and /search. Submit-driven, so no debounce/sequence guard needed.
     setOlLoading(true)
-    setOlBooks(await olSearch(term, { excludeTitles: (bR.data || []).map(b => b.title) }))
+    const ol = await olSearch(term, { excludeTitles: (bR.data || []).map(b => b.title) })
+    setOlBooks(ol)
     setOlLoading(false)
+
+    // Log for trending. Counts only if the search found something other than
+    // member profiles (people's names never feed trending). Fire-and-forget:
+    // a failed log never affects search.
+    const hits = (cR.data || []).length + (bR.data || []).length + (mR.data || []).length
+      + (wR.data || []).length + (brR.data || []).length + (ol || []).length
+    if (log && hits > 0) logSearch(term)
+  }
+
+  async function logSearch(term) {
+    try {
+      const qn = normalizeQuery(term)
+      if (qn.length < 2 || qn === lastLogged.current) return
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user?.id) return // logged-out searches aren't counted
+      lastLogged.current = qn
+      await supabase.from('search_events').insert({ member_id: session.user.id, query_norm: qn })
+    } catch (e) {}
   }
 
   function submit(e) { e?.preventDefault?.(); runSearch() }
