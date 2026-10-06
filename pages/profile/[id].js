@@ -285,7 +285,7 @@ export default function ProfilePage() {
         {shelfItems.some(s => s.status === 'want') && (
           <div style={{ marginBottom: 36 }}>
             <div style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 14 }}>Want to read</div>
-            <Bookshelf books={shelfItems.filter(s => s.status === 'want')} shelfLinks={shelfLinks} />
+            <Bookshelf books={shelfItems.filter(s => s.status === 'want')} shelfLinks={shelfLinks} onSelectBook={isOwner ? openAnnotations : undefined} />
           </div>
         )}
 
