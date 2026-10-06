@@ -9,6 +9,8 @@ import { useRouter } from 'next/router'
 //   books        : [{ title, author, book_key, status }]  (already filtered/passed in)
 //   shelfLinks   : { [title]: book_key }  fallback key resolution for rows w/o book_key
 //   onSelectBook : optional; when set, tapping a spine calls it instead of navigating
+//   size         : optional scale, default 1 (e.g. 0.85 on the profile, ~0.55 in a sidebar)
+//   emptyText    : optional message for an empty shelf (defaults to the profile wording)
 
 const OUTLINE = '#2C2C2A'
 const LABEL = '#FFF6E0'
@@ -74,7 +76,7 @@ function fitTitle(title, avail, labelW) {
 // Small per-book wobble so no two spines have identical corners.
 function wob(h, shift) { return (((h >>> shift) % 5) - 2) * 0.7 }
 
-function Spine({ title, look }) {
+function Spine({ title, look, s = 1 }) {
   const { h, fill, width: w, height: ht, decor } = look
   const cx = w / 2
   const a = wob(h, 2), b = wob(h, 5), c = wob(h, 8)
@@ -87,7 +89,7 @@ function Spine({ title, look }) {
   const lineGap = fit.size * 1.15
 
   return (
-    <svg width={w + 4} height={ht + 2} viewBox={`-2 0 ${w + 4} ${ht + 2}`} style={{ display: 'block', overflow: 'visible' }}>
+    <svg width={(w + 4) * s} height={(ht + 2) * s} viewBox={`-2 0 ${w + 4} ${ht + 2}`} style={{ display: 'block', overflow: 'visible' }}>
       <path d={body} fill={fill} stroke={OUTLINE} strokeWidth="3" strokeLinejoin="round" />
 
       {decor === 0 && <g stroke={OUTLINE} strokeWidth="2.5" strokeLinecap="round">
@@ -122,34 +124,35 @@ function Spine({ title, look }) {
   )
 }
 
-export default function Bookshelf({ books = [], shelfLinks = {}, onSelectBook }) {
+export default function Bookshelf({ books = [], shelfLinks = {}, onSelectBook, size = 1, emptyText }) {
+  const s = size > 0 ? size : 1
   const router = useRouter()
   const [hover, setHover] = useState(-1)
 
   if (!books.length) {
     return (
       <div>
-        <div style={{ height: 132, background: 'var(--sf)', border: '2.5px dashed var(--bd2)', borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '0 24px' }}>
-          <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.6 }}>
-            No books on your shelf yet.<br />Mark a book as <strong style={{ color: 'var(--ink)' }}>Reading</strong> or <strong style={{ color: 'var(--ink)' }}>Read</strong> and it lands here.
+        <div style={{ minHeight: Math.round(132 * s), background: 'var(--sf)', border: '2.5px dashed var(--bd2)', borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '12px 20px' }}>
+          <div style={{ fontFamily: 'var(--ui)', fontSize: s < 0.8 ? 12 : 13, color: 'var(--txD)', lineHeight: 1.6 }}>
+            {emptyText || <>No books on your shelf yet.<br />Mark a book as <strong style={{ color: 'var(--ink)' }}>Reading</strong> or <strong style={{ color: 'var(--ink)' }}>Read</strong> and it lands here.</>}
           </div>
         </div>
-        <Plank />
+        <Plank s={s} />
       </div>
     )
   }
 
   return (
-    <div style={{ overflowX: 'auto', paddingTop: 18 }}>
+    <div style={{ overflowX: 'auto', paddingTop: 18 * s }}>
       <div style={{ display: 'inline-flex', flexDirection: 'column', minWidth: '100%' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, padding: '0 28px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4 * s, padding: `0 ${28 * s}px` }}>
           {books.map((b, i) => {
             const href = spineHref(b, shelfLinks)
             const look = spineLook(b.title)
             const clickable = !!onSelectBook || !!href
             const up = hover === i
             // Leaning books pivot on their bottom corner; reserve room for the lean.
-            const room = look.lean ? Math.ceil(look.height * Math.sin(Math.abs(look.lean) * Math.PI / 180)) : 0
+            const room = look.lean ? Math.ceil(look.height * s * Math.sin(Math.abs(look.lean) * Math.PI / 180)) : 0
             return (
               <div
                 key={(b.book_key || b.title) + i}
@@ -166,7 +169,7 @@ export default function Bookshelf({ books = [], shelfLinks = {}, onSelectBook })
                   marginBottom: -2,
                   transformOrigin: look.lean > 0 ? 'bottom left' : 'bottom right',
                   // Hover: hop up and straighten, with a little overshoot
-                  transform: up ? 'translateY(-12px) rotate(0deg)' : `rotate(${look.lean}deg)`,
+                  transform: up ? `translateY(${-12 * s}px) rotate(0deg)` : `rotate(${look.lean}deg)`,
                   transition: 'transform 280ms cubic-bezier(.34, 1.7, .64, 1)',
                   filter: 'drop-shadow(3px 3px 0 rgba(0,0,0,0.16))',
                   flexShrink: 0,
@@ -174,29 +177,29 @@ export default function Bookshelf({ books = [], shelfLinks = {}, onSelectBook })
                   zIndex: up ? 2 : 1,
                 }}
               >
-                <Spine title={b.title} look={look} />
+                <Spine title={b.title} look={look} s={s} />
               </div>
             )
           })}
         </div>
-        <Plank />
+        <Plank s={s} />
       </div>
     </div>
   )
 }
 
 // Wobbly wooden plank with two brackets.
-function Plank() {
+function Plank({ s = 1 }) {
   const bracket = (side) => (
-    <svg width="34" height="30" viewBox="0 0 34 30" style={{ position: 'absolute', top: 22, [side]: '8%' }} aria-hidden="true">
+    <svg width={34 * s} height={30 * s} viewBox="0 0 34 30" style={{ position: 'absolute', top: 22 * s, [side]: '8%' }} aria-hidden="true">
       <path d={side === 'left' ? 'M 4 2 L 4 27 L 31 2 Z' : 'M 30 2 L 30 27 L 3 2 Z'} fill="#854F0B" stroke={OUTLINE} strokeWidth="3" strokeLinejoin="round" />
     </svg>
   )
   return (
-    <div style={{ position: 'relative', minWidth: '100%', paddingBottom: 30 }}>
+    <div style={{ position: 'relative', minWidth: '100%', paddingBottom: 30 * s }}>
       <div style={{
-        position: 'relative', zIndex: 3, height: 22, background: '#C98A2E',
-        border: `3px solid ${OUTLINE}`, borderRadius: '8px 12px 9px 6px / 6px 9px 7px 10px',
+        position: 'relative', zIndex: 3, height: Math.max(12, 22 * s), background: '#C98A2E',
+        border: `${s < 0.8 ? 2.5 : 3}px solid ${OUTLINE}`, borderRadius: '8px 12px 9px 6px / 6px 9px 7px 10px',
         transform: 'rotate(-0.4deg)', overflow: 'hidden',
       }}>
         <svg width="100%" height="100%" preserveAspectRatio="none" viewBox="0 0 100 20" aria-hidden="true" style={{ display: 'block' }}>
