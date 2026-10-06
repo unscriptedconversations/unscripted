@@ -84,6 +84,9 @@ export default function Landing() {
   const [recentPosts, setRecentPosts] = useState([])
   const [myMemberships, setMyMemberships] = useState(null)
   const [currentUser, setCurrentUser] = useState(null)
+  // False until we know whether someone is logged in. The nav's auth area stays
+  // blank until then, so it never flashes "Log in / Join" for a logged-in member.
+  const [authReady, setAuthReady] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -91,10 +94,14 @@ export default function Landing() {
 
     // Load session from Supabase Auth (replaces localStorage)
     supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) return
-      const { data: member } = await supabase
-        .from('members').select('*').eq('id', session.user.id).single()
-      if (member) setCurrentUser(member)
+      try {
+        if (!session) return
+        const { data: member } = await supabase
+          .from('members').select('*').eq('id', session.user.id).single()
+        if (member) setCurrentUser(member)
+      } finally {
+        setAuthReady(true)
+      }
     })
 
     // Keep in sync on login/logout/OAuth
@@ -285,7 +292,9 @@ export default function Landing() {
             <button className="nav-btn active">Explore</button>
             <button className="nav-btn" onClick={() => router.push('/writing')}>Writing</button>
             {BRIDGE_ENABLED && <button className="nav-btn" onClick={() => router.push('/bridge')}>Bridge</button>}
-            {currentUser ? (
+            {!authReady ? (
+              <div aria-hidden="true" style={{ minWidth: 120 }} />
+            ) : currentUser ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                 <NotificationBell currentUser={currentUser} />
                 <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
