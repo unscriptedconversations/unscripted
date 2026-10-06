@@ -65,12 +65,14 @@ export default function Landing() {
     return () => clearTimeout(t)
   }, [spot, spotPaused])
   function spotGo(to) {
-    if (to.search) return router.push('/search?q=' + encodeURIComponent(to.search))
+    // src=spotlight: curated link, so /search doesn't count it toward trending
+    if (to.search) return router.push('/search?q=' + encodeURIComponent(to.search) + '&src=spotlight')
     if (to.create) return router.push(currentUser ? '/create' : '/signup')
     if (to.href) return router.push(to.href)
   }
   const [clubs, setClubs] = useState([])
   const [books, setBooks] = useState([])
+  const [trending, setTrending] = useState([])
   const [q, setQ] = useState('')
   const [sr, setSR] = useState(null)
   const [srTab, setSrTab] = useState('all')
@@ -120,11 +122,14 @@ export default function Landing() {
 
   async function loadData() {
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-    const [cR, bR, pR] = await Promise.all([
+    const [cR, bR, pR, tR] = await Promise.all([
       supabase.from('clubs').select('*, club_members(count), books(title, author, status)'),
       supabase.from('books').select('*, club:clubs(name)').order('created_at', { ascending: false }),
       supabase.from('posts').select('club_id, member_id, created_at').gte('created_at', since),
+      // Ranked + slot-limited server-side (see trending_searches() in SQL)
+      supabase.rpc('trending_searches'),
     ])
+    setTrending((tR.data || []).map(r => r.term).filter(Boolean))
     if (cR.data) setClubs(cR.data)
     if (bR.data) setBooks(bR.data)
     if (pR.data) {
@@ -267,7 +272,6 @@ export default function Landing() {
   const featuredDisplay = featuredClubs.length > 0
     ? featuredClubs.slice(0, 3)
     : [...clubs].sort((a, b) => getClubMemberCount(b) - getClubMemberCount(a)).slice(0, 3)
-  const uniqueBooks = [...new Map(books.map(b => [b.title, b])).values()].slice(0, 6)
 
   return (
     <div style={{ minHeight: '100vh' }}>
@@ -475,29 +479,18 @@ export default function Landing() {
           </div>
         </section>}
 
-        {/* TRENDING BOOKS */}
-        {!loading && <section style={{ marginBottom: 48 }}>
-          <div className="section-title" style={{ marginBottom: 20 }}>Trending on Unscripted</div>
-          {uniqueBooks.length > 0 ? (
-            <div style={{ display: 'flex', gap: 14, overflowX: 'auto', scrollbarWidth: 'none' }}>
-              {uniqueBooks.map(b => (
-                <div key={b.id} style={{ minWidth: 180, background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '20px 18px', flexShrink: 0, cursor: 'pointer' }}
-                  onClick={() => router.push(`/book/${b.id}`)}>
-                  <div style={{ fontFamily: 'var(--hd)', fontSize: 16, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)', lineHeight: 1.25, marginBottom: 6 }}>{b.title}</div>
-                  <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ display: 'flex', gap: 14 }}>
-              {['Literary Fiction', 'Memoir', 'Speculative Fiction'].map(genre => (
-                <div key={genre} style={{ minWidth: 180, background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 14, padding: '20px 18px', flexShrink: 0, opacity: 0.5 }}>
-                  <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 8 }}>{genre}</div>
-                  <div style={{ fontFamily: 'var(--hd)', fontSize: 14, fontStyle: 'italic', color: 'var(--txD)', lineHeight: 1.4 }}>Start a club to see what the community is reading</div>
-                </div>
-              ))}
-            </div>
-          )}
+        {/* TRENDING SEARCHES */}
+        {!loading && trending.length > 0 && <section style={{ marginBottom: 48 }}>
+          <div className="section-title" style={{ marginBottom: 20 }}>Trending searches</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+            {trending.map(term => (
+              <button key={term}
+                onClick={() => router.push(`/search?q=${encodeURIComponent(term)}&src=trending`)}
+                style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 600, color: 'var(--ink)', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 999, padding: '10px 18px', cursor: 'pointer' }}>
+                {term}
+              </button>
+            ))}
+          </div>
         </section>}
 
         {/* FOOTER */}
