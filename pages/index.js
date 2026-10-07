@@ -57,13 +57,24 @@ const SPOTLIGHT_SLIDES = [
 
 export default function Landing() {
   const router = useRouter()
-  const [spot, setSpot] = useState(0)
+  // Slideshow: slides sit side by side on a track that slides left. A copy of
+  // slide 0 sits at the end so the show always moves forward; when it lands on
+  // the copy, the track snaps (unanimated) back to the real slide 0.
+  const SPOT_N = SPOTLIGHT_SLIDES.length
+  const [spotPos, setSpotPos] = useState(0)        // 0..SPOT_N (SPOT_N = the copy)
+  const [spotAnim, setSpotAnim] = useState(true)
   const [spotPaused, setSpotPaused] = useState(false)
+  const spot = spotPos % SPOT_N
   useEffect(() => {
     if (spotPaused) return
-    const t = setTimeout(() => setSpot(s => (s + 1) % SPOTLIGHT_SLIDES.length), 3000)
+    const t = setTimeout(() => { setSpotAnim(true); setSpotPos(p => (p >= SPOT_N ? 1 : p + 1)) }, 3000) // p >= SPOT_N: snap was missed (e.g. reduced motion)
     return () => clearTimeout(t)
-  }, [spot, spotPaused])
+  }, [spotPos, spotPaused])
+  function setSpot(i) { setSpotAnim(true); setSpotPos(i) }
+  function spotSettled(e) {
+    if (e.target !== e.currentTarget) return // ignore transitions bubbling from buttons
+    if (spotPos === SPOT_N) { setSpotAnim(false); setSpotPos(0) }
+  }
   function spotGo(to) {
     // src=spotlight: curated link, so /search doesn't count it toward trending
     if (to.search) return router.push('/search?q=' + encodeURIComponent(to.search) + '&src=spotlight')
@@ -423,22 +434,27 @@ export default function Landing() {
         {/* SPOTLIGHT */}
         <section style={{ marginBottom: 48 }}>
           <div style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 20 }}>✦ Spotlight</div>
-          <style>{`@keyframes spotlightFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }`}</style>
-          <div onMouseEnter={() => setSpotPaused(true)} onMouseLeave={() => setSpotPaused(false)} style={{ background: 'var(--ink)', borderRadius: 20, padding: '40px 48px 46px', position: 'relative', overflow: 'hidden', minHeight: 264 }}>
+          <style>{`@media (prefers-reduced-motion: reduce) { .spot-track { transition: none !important; } }`}</style>
+          <div onMouseEnter={() => setSpotPaused(true)} onMouseLeave={() => setSpotPaused(false)} style={{ background: 'var(--ink)', borderRadius: 20, position: 'relative', overflow: 'hidden', minHeight: 264 }}>
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: 'linear-gradient(90deg, var(--tc), var(--sg))' }} />
-            {(() => { const sl = spotlightSlides[spot]; return (
-              <div key={spot} style={{ animation: 'spotlightFade 500ms ease' }}>
-                <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--tc)', marginBottom: 16 }}>{sl.kicker}</div>
-                <div style={{ fontFamily: 'var(--hd)', fontSize: 32, fontWeight: 600, fontStyle: 'italic', color: '#F2EBE0', lineHeight: 1.15, marginBottom: 8 }}>{sl.title}</div>
-                <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'rgba(242,235,224,0.5)', marginBottom: 20 }}>{sl.subtitle}</div>
-                <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontStyle: 'italic', lineHeight: 1.7, color: 'rgba(242,235,224,0.6)', marginBottom: 24, maxWidth: 600 }}>{sl.blurb}</div>
-                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                  {sl.ctas.map((c, i) => (
-                    <button key={i} className="join-btn" onClick={() => spotGo(c.to)} style={c.primary ? { background: 'var(--tc)', color: 'var(--ink)' } : { background: 'none', border: '1.5px solid rgba(242,235,224,0.2)', color: '#F2EBE0' }}>{c.label}</button>
-                  ))}
+            <div className="spot-track" onTransitionEnd={spotSettled} style={{ display: 'flex', transform: `translateX(-${spotPos * 100}%)`, transition: spotAnim ? 'transform 650ms cubic-bezier(.65, 0, .35, 1)' : 'none' }}>
+              {[...spotlightSlides, spotlightSlides[0]].map((sl, si) => (
+                <div key={si} aria-hidden={si !== spotPos}
+                  style={{ flex: '0 0 100%', minWidth: 0, boxSizing: 'border-box', padding: '40px 48px 46px',
+                    // Off-screen slides hide (after sliding out) so their buttons can't take keyboard focus
+                    visibility: si === spotPos ? 'visible' : 'hidden', transition: si === spotPos ? 'visibility 0s' : 'visibility 0s linear 650ms' }}>
+                    <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--tc)', marginBottom: 16 }}>{sl.kicker}</div>
+                    <div style={{ fontFamily: 'var(--hd)', fontSize: 32, fontWeight: 600, fontStyle: 'italic', color: '#F2EBE0', lineHeight: 1.15, marginBottom: 8 }}>{sl.title}</div>
+                    <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'rgba(242,235,224,0.5)', marginBottom: 20 }}>{sl.subtitle}</div>
+                    <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontStyle: 'italic', lineHeight: 1.7, color: 'rgba(242,235,224,0.6)', marginBottom: 24, maxWidth: 600 }}>{sl.blurb}</div>
+                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                      {sl.ctas.map((c, i) => (
+                        <button key={i} className="join-btn" onClick={() => spotGo(c.to)} style={c.primary ? { background: 'var(--tc)', color: 'var(--ink)' } : { background: 'none', border: '1.5px solid rgba(242,235,224,0.2)', color: '#F2EBE0' }}>{c.label}</button>
+                      ))}
+                    </div>
                 </div>
-              </div>
-            ) })()}
+              ))}
+            </div>
             <div style={{ position: 'absolute', bottom: 18, right: 24, display: 'flex', gap: 8 }}>
               {spotlightSlides.map((_, i) => (
                 <button key={i} onClick={() => setSpot(i)} aria-label={`Go to slide ${i + 1}`} style={{ width: 8, height: 8, borderRadius: '50%', padding: 0, border: 'none', cursor: 'pointer', background: i === spot ? 'var(--tc)' : 'rgba(242,235,224,0.25)', transition: 'background 0.2s' }} />
