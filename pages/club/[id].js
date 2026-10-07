@@ -7,7 +7,7 @@ import NotificationBell from '../../components/NotificationBell'
 import ClubChat from '../../components/ClubChat'
 import { notifyMentions, createNotification, notifyClubPost } from '../../lib/notify'
 import ManualBookAdd from '../../components/ManualBookAdd'
-import Bookshelf from '../../components/Bookshelf'
+import Bookshelf, { BookCover } from '../../components/Bookshelf'
 import { normalizeTags } from '../../lib/tags'
 
 function timeAgo(date) {
@@ -570,6 +570,58 @@ export default function ClubPage() {
     </div>
   )
 
+  // "Now reading" card that leads the feed: answers "what are we reading and
+  // where are we?" with one primary next step (the current chapter's thread).
+  const heroCard = { display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 18, padding: '24px 26px', marginBottom: 28 }
+  const heroKicker = { fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--tc)', marginBottom: 6 }
+  const heroBtn = { fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', borderRadius: 10, padding: '12px 20px', cursor: 'pointer' }
+  const heroPrimary = { ...heroBtn, color: '#FFF', background: 'var(--tc)', border: 'none' }
+  const heroSecondary = { ...heroBtn, color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)' }
+  let nowReading = null
+  if (!books.length) {
+    nowReading = (
+      <div style={heroCard}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div style={heroKicker}>Now reading</div>
+          <div style={{ fontFamily: 'var(--hd)', fontSize: 24, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)', lineHeight: 1.2, marginBottom: 6 }}>{isHost ? "Pick your club's first book" : 'Your host is choosing the first book'}</div>
+          <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.6, marginBottom: isHost ? 16 : 0 }}>{isHost ? 'Add a book and its chapters, and chapter threads open up for the club.' : 'Check back soon. Chapter threads open up once a book is added.'}</div>
+          {isHost && <button style={heroPrimary} onClick={() => setShowAddBook(true)}>+ Add book</button>}
+        </div>
+      </div>
+    )
+  } else if (curBook) {
+    const total = curBook.total_chapters || 0
+    const clubCh = Math.min(curBook.current_chapter || 0, total)
+    const myCh = isMember ? Math.min(memberProgress[curBook.id] || 0, total) : 0
+    const bookThreads = threads.filter(t => t.book_id === curBook.id)
+    const chThread = total ? bookThreads.find(t => t.chapter_number === Math.max(1, clubCh)) : null
+    const openT = bookThreads.find(t => t.chapter_number === 0)
+    const toBook = () => { setSelBook(curBook.id); setDiscMode('chapters') }
+    const primary = chThread
+      ? { label: `Discuss chapter ${chThread.chapter_number}`, go: () => { toBook(); openThread(chThread) } }
+      : openT
+        ? { label: 'Open discussion', go: () => { toBook(); openThread(openT) } }
+        : { label: 'View discussions', go: () => { toBook(); setView('disc') } }
+    nowReading = (
+      <div style={heroCard}>
+        <div style={{ cursor: 'pointer' }} onClick={() => { toBook(); setView('disc') }}><BookCover title={curBook.title} /></div>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div style={heroKicker}>{curBook.status === 'current' ? 'Now reading' : 'From the shelf'}</div>
+          <div style={{ fontFamily: 'var(--hd)', fontSize: 28, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)', lineHeight: 1.15 }}>{curBook.title}</div>
+          {curBook.author && <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', marginTop: 4 }}>{curBook.author}</div>}
+          {total > 0 && <div style={{ marginTop: 14 }}>
+            <ChapterProgress book={curBook} showLabel={false} />
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', marginTop: 6 }}>Club is on chapter {clubCh} of {total}{myCh > 0 ? ` · you're on ${myCh}` : ''}</div>
+          </div>}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 18 }}>
+            <button style={heroPrimary} onClick={primary.go}>{primary.label}</button>
+            {total > 0 && <button style={heroSecondary} onClick={() => { toBook(); setView('disc') }}>All chapters</button>}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   if (!club) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontFamily: 'var(--ui)', color: 'var(--txD)' }}>Loading...</div></div>
 
   return (
@@ -721,7 +773,7 @@ export default function ClubPage() {
         {/* FEED */}
         {view === 'feed' && <div className="main-grid" style={{ paddingBottom: 80 }}>
           <div>
-            <div className="section-title" style={{ marginBottom: 20 }}>The Feed</div>
+            {nowReading}
             <style>{`.club-shelf-mobile { display: none } @media (max-width: 800px) { .club-shelf-mobile { display: block } }`}</style>
             <div className="club-shelf-mobile" style={{ marginBottom: 28 }}>{clubShelf}</div>
             {meetingUrl && (isMember || isHost) && <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '16px 20px', marginBottom: 20 }}>
@@ -742,15 +794,15 @@ export default function ClubPage() {
                 <button onClick={copyInviteLink} style={{ ...sharePromptBtn, color: inviteCopied ? 'var(--sg)' : 'var(--ink)' }}>{inviteCopied ? '✓ Copied!' : '🔗 Copy link'}</button>
               </div>
             </div>}
-            {isMember && currentMembership && !currentMembership.has_posted && <div style={{ background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 16, padding: '32px 28px', marginBottom: 24, textAlign: 'center' }}>
-              <div style={{ fontSize: 40, marginBottom: 14 }}>{'\u270D\uFE0F'}</div>
-              <div style={{ fontFamily: 'var(--hd)', fontSize: 22, fontWeight: 600, color: 'var(--ink)', marginBottom: 10 }}>Your first word</div>
-              <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', lineHeight: 1.6, maxWidth: 440, margin: '0 auto 22px' }}>Don't just read to consume. Share your thoughts, sit with ideas, and build your voice — this room is better with you in it.</div>
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-                <button onClick={() => document.getElementById('feed-compose')?.focus()} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--tc)', border: 'none', borderRadius: 10, padding: '12px 22px', cursor: 'pointer' }}>Write your first post</button>
-                <button onClick={() => setShowHow(v => !v)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 10, padding: '12px 22px', cursor: 'pointer' }}>{showHow ? 'Hide' : 'See how it works'}</button>
+            <div className="section-title" style={{ marginBottom: 20 }}>The Feed</div>
+            {isMember && currentMembership && !currentMembership.has_posted && <div style={{ background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 14, padding: '14px 18px', marginBottom: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 18 }}>{'\u270D\uFE0F'}</span>
+                <div style={{ flex: 1, minWidth: 180, fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.5 }}><strong style={{ color: 'var(--ink)' }}>Say hello.</strong> Your first post warms up the room.</div>
+                <button onClick={() => document.getElementById('feed-compose')?.focus()} style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--tc)', border: 'none', borderRadius: 8, padding: '9px 14px', cursor: 'pointer' }}>Write your first post</button>
+                <button onClick={() => setShowHow(v => !v)} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--txD)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textDecoration: 'underline' }}>{showHow ? 'Hide' : 'How it works'}</button>
               </div>
-              {showHow && <div style={{ textAlign: 'left', marginTop: 24, borderTop: '1px solid var(--bd)', paddingTop: 20, display: 'grid', gap: 16 }}>
+              {showHow && <div style={{ textAlign: 'left', marginTop: 16, borderTop: '1px solid var(--bd)', paddingTop: 20, display: 'grid', gap: 16 }}>
                 {[['\uD83D\uDCAC', 'Post to the feed', 'Quick thoughts, questions, or reactions your whole club sees.'], ['\uD83D\uDCD6', 'Join a chapter thread', 'Tap a book on the club shelf to go deep chapter by chapter — spoiler-safe.'], ['\uD83D\uDD25', 'Build a streak', 'Posting or visiting each day grows your writing and reading streaks.']].map(([icon, h, d]) => (
                   <div key={h} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
                     <span style={{ fontSize: 20, flexShrink: 0 }}>{icon}</span>
@@ -764,7 +816,6 @@ export default function ClubPage() {
             {filteredPosts.map(p => { const m = p.member || {}; const th = parseThemes(p.themes); return <div key={p.id} className="feed-card"><div className="feed-header"><MemberAvatar member={m} size={32} /><div><span className="feed-name" onClick={() => openProfile(m)}>{m.first_name}</span><span className="feed-time">{timeAgo(p.created_at)}</span></div><span style={{ marginLeft: 'auto' }}><Tag tag={p.tag} /></span></div><div className="feed-body">{renderContent(p.content)}</div>{p.sitting_with && <div className="sitting-with"><div className="sitting-label">Sitting with</div><div className="sitting-text">"{p.sitting_with}"</div></div>}{th.length > 0 && <div className="theme-pills">{th.map(t => <ThemePill key={t} t={t} active={filterTheme === t} onClick={() => setFilterTheme(filterTheme === t ? null : t)} />)}</div>}<div className="feed-actions"><button className={`feed-action ${isLiked(p.id) ? 'liked' : ''}`} onClick={() => toggleLike(p.id)}>{isLiked(p.id) ? '\u2665' : '\u2661'} {likeCount(p.id)}</button></div></div> })}
           </div>
           <div className="sidebar">
-            {curBook && <div className="sidebar-section"><div className="sidebar-label">Currently Reading</div><div className="book-card" style={{ cursor: 'pointer' }} onClick={() => setView('disc')}><div className="book-card-inner" style={{ padding: 24 }}><div className="book-title" style={{ fontSize: 20 }}>{curBook.title}</div><div className="book-author" style={{ marginBottom: 12 }}>{curBook.author}</div><ChapterProgress book={curBook} /></div></div></div>}
             <div className="sidebar-section">{clubShelf}</div>
           </div>
         </div>}
