@@ -7,6 +7,7 @@ import NotificationBell from '../../components/NotificationBell'
 import ClubChat from '../../components/ClubChat'
 import { notifyMentions, createNotification, notifyClubPost } from '../../lib/notify'
 import ManualBookAdd from '../../components/ManualBookAdd'
+import Bookshelf from '../../components/Bookshelf'
 import { normalizeTags } from '../../lib/tags'
 
 function timeAgo(date) {
@@ -557,6 +558,18 @@ export default function ClubPage() {
 
   const stepBtn = { width: 30, height: 30, borderRadius: 8, border: '1.5px solid var(--bd2)', background: 'var(--sf)', color: 'var(--ink)', fontFamily: 'var(--ui)', fontSize: 18, fontWeight: 700, lineHeight: 1, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }
 
+  // Mini club shelf: in the feed sidebar on desktop, and atop the feed on phones
+  // (where the sidebar is hidden). Tapping a book opens its discussions.
+  const clubShelf = (
+    <div>
+      <div className="sidebar-label">Club shelf ({books.length})</div>
+      <Bookshelf books={books} size={0.55}
+        onSelectBook={b => { setSelBook(b.id); setDiscMode('chapters'); setView('disc') }}
+        emptyText={isHost ? 'No books yet. Add the first one below.' : 'No books on the club shelf yet.'} />
+      {isHost && <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer', width: '100%', marginTop: 8 }} onClick={() => setShowAddBook(true)}>+ Add book</button>}
+    </div>
+  )
+
   if (!club) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontFamily: 'var(--ui)', color: 'var(--txD)' }}>Loading...</div></div>
 
   return (
@@ -695,7 +708,6 @@ export default function ClubPage() {
         <div className="club-tab-nav" style={{ marginBottom: 32 }}>
           {[
             ['feed', 'Feed'],
-            ['disc', 'Bookshelf'],
             ['members', 'Members'],
             ...(isMember || isHost ? [['chat', 'Chat'], ['settings', 'Settings']] : []),
           ].map(([k, l]) =>
@@ -710,6 +722,8 @@ export default function ClubPage() {
         {view === 'feed' && <div className="main-grid" style={{ paddingBottom: 80 }}>
           <div>
             <div className="section-title" style={{ marginBottom: 20 }}>The Feed</div>
+            <style>{`.club-shelf-mobile { display: none } @media (max-width: 800px) { .club-shelf-mobile { display: block } }`}</style>
+            <div className="club-shelf-mobile" style={{ marginBottom: 28 }}>{clubShelf}</div>
             {meetingUrl && (isMember || isHost) && <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '16px 20px', marginBottom: 20 }}>
               <div style={{ fontSize: 22, flexShrink: 0 }}>🎥</div>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -737,7 +751,7 @@ export default function ClubPage() {
                 <button onClick={() => setShowHow(v => !v)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 10, padding: '12px 22px', cursor: 'pointer' }}>{showHow ? 'Hide' : 'See how it works'}</button>
               </div>
               {showHow && <div style={{ textAlign: 'left', marginTop: 24, borderTop: '1px solid var(--bd)', paddingTop: 20, display: 'grid', gap: 16 }}>
-                {[['\uD83D\uDCAC', 'Post to the feed', 'Quick thoughts, questions, or reactions your whole club sees.'], ['\uD83D\uDCD6', 'Join a chapter thread', 'Go deep chapter by chapter in the Bookshelf tab — spoiler-safe.'], ['\uD83D\uDD25', 'Build a streak', 'Posting or visiting each day grows your writing and reading streaks.']].map(([icon, h, d]) => (
+                {[['\uD83D\uDCAC', 'Post to the feed', 'Quick thoughts, questions, or reactions your whole club sees.'], ['\uD83D\uDCD6', 'Join a chapter thread', 'Tap a book on the club shelf to go deep chapter by chapter — spoiler-safe.'], ['\uD83D\uDD25', 'Build a streak', 'Posting or visiting each day grows your writing and reading streaks.']].map(([icon, h, d]) => (
                   <div key={h} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
                     <span style={{ fontSize: 20, flexShrink: 0 }}>{icon}</span>
                     <div><div style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>{h}</div><div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', lineHeight: 1.5 }}>{d}</div></div>
@@ -751,13 +765,13 @@ export default function ClubPage() {
           </div>
           <div className="sidebar">
             {curBook && <div className="sidebar-section"><div className="sidebar-label">Currently Reading</div><div className="book-card" style={{ cursor: 'pointer' }} onClick={() => setView('disc')}><div className="book-card-inner" style={{ padding: 24 }}><div className="book-title" style={{ fontSize: 20 }}>{curBook.title}</div><div className="book-author" style={{ marginBottom: 12 }}>{curBook.author}</div><ChapterProgress book={curBook} /></div></div></div>}
-            <div className="sidebar-section"><div className="sidebar-label">Books ({books.length})</div>{books.map(b => <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 10, marginBottom: 6, cursor: 'pointer' }} onClick={() => { setSelBook(b.id); setView('disc') }}><span className="tag" style={{ background: b.status === 'current' ? 'var(--tcD)' : 'rgba(94,122,98,0.1)', color: b.status === 'current' ? 'var(--tc)' : 'var(--sg)' }}>{b.status === 'current' ? 'now' : 'done'}</span><div style={{ flex: 1 }}><span style={{ fontFamily: 'var(--hd)', fontSize: 13, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</span><ChapterProgress book={b} showLabel={false} compact /></div></div>)}{isHost && <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer', width: '100%', marginTop: 8 }} onClick={() => setShowAddBook(true)}>+ Add book</button>}</div>
+            <div className="sidebar-section">{clubShelf}</div>
           </div>
         </div>}
 
         {/* BOOKSHELF / DISCUSSIONS */}
         {view === 'disc' && <div style={{ paddingBottom: 80 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><div className="section-title">Bookshelf</div>{isHost && <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer' }} onClick={() => setShowAddBook(true)}>+ Add book</button>}</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><button className="thread-view-back" onClick={() => setView('feed')}>← Back to feed</button>{isHost && <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer' }} onClick={() => setShowAddBook(true)}>+ Add book</button>}</div>
           <div className="shelf">{books.map(b => <div key={b.id} className={`shelf-item ${selBook === b.id ? 'active' : ''}`} onClick={() => { setSelBook(b.id); setDiscMode('chapters') }}><div className={`shelf-title ${selBook === b.id ? 'inv' : ''}`}>{b.title}</div><div className={`shelf-author ${selBook === b.id ? 'inv' : ''}`}>{b.author}</div><span className="tag" style={{ background: b.status === 'current' ? (selBook === b.id ? 'rgba(194,122,90,0.25)' : 'var(--tcD)') : (selBook === b.id ? 'rgba(94,122,98,0.25)' : 'rgba(94,122,98,0.1)'), color: b.status === 'current' ? 'var(--tc)' : 'var(--sg)', width: 'fit-content', marginTop: 4 }}>{b.status === 'current' ? 'Reading Now' : 'Completed'}</span><ChapterProgress book={b} /></div>)}</div>
 
           {activeBook && <>
@@ -808,7 +822,7 @@ export default function ClubPage() {
         {/* THREAD */}
         {view === 'thread' && activeThread && <div style={{ paddingBottom: 80 }}>
           <div className="thread-view-header">
-            <button className="thread-view-back" onClick={() => setView('disc')}>← Back to bookshelf</button>
+            <button className="thread-view-back" onClick={() => setView('disc')}>← Back to discussions</button>
             <div className="thread-view-title">{activeThread.title}</div>
             <div className="thread-view-meta">{topLevelTP.length} posts · {tReplies.length} replies</div>
           </div>
