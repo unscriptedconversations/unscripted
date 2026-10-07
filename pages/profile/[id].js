@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
 import { updateColor } from '../../lib/auth'
 import Logo from '../../components/Logo'
 import NotificationBell from '../../components/NotificationBell'
 import Bookshelf from '../../components/Bookshelf'
+import PinnedPapers from '../../components/PinnedPapers'
 import { createNotification } from '../../lib/notify'
 import { olSearch } from '../../lib/olSearch'
 
@@ -55,6 +56,7 @@ export default function ProfilePage() {
   const [listMembers, setListMembers] = useState([])
   const [listLoading, setListLoading] = useState(false)
   const [tab, setTab] = useState('writing')
+  const tabsRef = useRef(null) // Writing tab, for the pinned papers to scroll to
   const [showColorPicker, setShowColorPicker] = useState(false)
   const [accountModal, setAccountModal] = useState(null)   // 'disable' | 'delete'
   const [churnReasons, setChurnReasons] = useState([])
@@ -238,6 +240,8 @@ export default function ProfilePage() {
     setAnnoList(l => l.filter(a => a.id !== aid))
   }
   const published = writings.filter(w => w.is_published)
+  // Pinned papers -> Writing tab, scrolled into view
+  function openWritingTab() { setTab('writing'); requestAnimationFrame(() => tabsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })) }
   const drafts = writings.filter(w => !w.is_published)
 
   return (
@@ -272,24 +276,33 @@ export default function ProfilePage() {
 
         <div style={{ marginBottom: 32 }} />
 
-        {(isOwner || shelfItems.some(s => s.status === 'read' || s.status === 'reading')) && (
-          <div style={{ marginBottom: 36 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-              <div style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Bookshelf</div>
-              {isOwner && <button onClick={() => setShowAddBook(true)} style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer' }}>+ Add book</button>}
+        {/* Shelves (left) + pinned writings (right; wraps below on narrow screens) */}
+        <div style={{ display: 'flex', gap: 28, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+
+          {(isOwner || shelfItems.some(s => s.status === 'read' || s.status === 'reading')) && (
+            <div style={{ marginBottom: 36 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Bookshelf</div>
+                {isOwner && <button onClick={() => setShowAddBook(true)} style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer' }}>+ Add book</button>}
+              </div>
+              <Bookshelf books={shelfItems.filter(s => s.status === 'read' || s.status === 'reading')} shelfLinks={shelfLinks} size={0.85} onSelectBook={isOwner ? openAnnotations : undefined} />
             </div>
-            <Bookshelf books={shelfItems.filter(s => s.status === 'read' || s.status === 'reading')} shelfLinks={shelfLinks} onSelectBook={isOwner ? openAnnotations : undefined} />
-          </div>
-        )}
+          )}
 
-        {shelfItems.some(s => s.status === 'want') && (
-          <div style={{ marginBottom: 36 }}>
-            <div style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 14 }}>Want to read</div>
-            <Bookshelf books={shelfItems.filter(s => s.status === 'want')} shelfLinks={shelfLinks} onSelectBook={isOwner ? openAnnotations : undefined} />
+          {shelfItems.some(s => s.status === 'want') && (
+            <div style={{ marginBottom: 36 }}>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 14 }}>Want to read</div>
+              <Bookshelf books={shelfItems.filter(s => s.status === 'want')} shelfLinks={shelfLinks} size={0.85} onSelectBook={isOwner ? openAnnotations : undefined} />
+            </div>
+          )}
           </div>
-        )}
+          {(published.length > 0 || isOwner) && <div style={{ flex: '0 0 auto', paddingTop: 30, marginBottom: 36 }}>
+            <PinnedPapers count={published.length} isOwner={isOwner} onOpen={openWritingTab} onWrite={() => router.push('/write')} />
+          </div>}
+        </div>
 
-        <div style={{ display: 'flex', borderBottom: '1px solid var(--bd)', marginBottom: 24 }}>
+        <div ref={tabsRef} style={{ display: 'flex', borderBottom: '1px solid var(--bd)', marginBottom: 24, scrollMarginTop: 16 }}>
           {[['writing', 'Writing'], ['clubs', 'Clubs'], ...(isOwner ? [['account', 'Account']] : [])].map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: tab === k ? 'var(--ink)' : 'var(--txD)', background: 'none', border: 'none', cursor: 'pointer', padding: '12px 20px 12px 0', position: 'relative' }}>
               {l}{tab === k && <div style={{ position: 'absolute', bottom: -1, left: 0, right: 20, height: 2, background: 'var(--tc)', borderRadius: 2 }} />}
