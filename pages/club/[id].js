@@ -354,7 +354,7 @@ export default function ClubPage() {
   async function submitThreadPost() {
     if (!threadNewPost.trim() || !currentUser || !activeThread) return
     await supabase.from('thread_replies').insert({ thread_id: activeThread.id, member_id: currentUser.id, content: threadNewPost.trim(), sitting_with: threadNewSit.trim() || null, themes: threadNewThemes.trim() || null })
-    notifyMentions({ text: threadNewPost, members, actorId: currentUser.id, link: `/club/${id}`, preview: threadNewPost.trim().slice(0, 60) })
+    notifyMentions({ text: threadNewPost, members, actorId: currentUser.id, link: `/club/${id}?thread=${activeThread.id}`, preview: threadNewPost.trim().slice(0, 60) })
     await bumpWriteStreak()
     await markHasPosted()
     setThreadNewPost(''); setThreadNewSit(''); setThreadNewThemes(''); loadThreadPosts(activeThread.id)
@@ -363,9 +363,9 @@ export default function ClubPage() {
   async function submitReply(parentId) {
     if (!replyText.trim() || !currentUser || !activeThread) return
     await supabase.from('thread_replies').insert({ thread_id: activeThread.id, member_id: currentUser.id, content: replyText.trim(), parent_reply_id: parentId })
-    notifyMentions({ text: replyText, members, actorId: currentUser.id, link: `/club/${id}`, preview: replyText.trim().slice(0, 60) })
+    notifyMentions({ text: replyText, members, actorId: currentUser.id, link: `/club/${id}?thread=${activeThread.id}`, preview: replyText.trim().slice(0, 60) })
     const parent = threadPosts.find(tp => tp.id === parentId)
-    if (parent?.member_id) createNotification({ recipientId: parent.member_id, actorId: currentUser.id, type: 'reply', link: `/club/${id}`, preview: replyText.trim().slice(0, 60) })
+    if (parent?.member_id) createNotification({ recipientId: parent.member_id, actorId: currentUser.id, type: 'reply', link: `/club/${id}?thread=${activeThread.id}`, preview: replyText.trim().slice(0, 60) })
     await bumpWriteStreak()
     await markHasPosted()
     setReplyText(''); setReplyingTo(null); setExpandedReplies(p => ({ ...p, [parentId]: true })); loadThreadPosts(activeThread.id)
@@ -486,6 +486,18 @@ export default function ClubPage() {
   const parseThemes = str => (str || '').split(',').map(t => t.trim()).filter(Boolean)
 
   const openThread = t => { setActiveThread(t); setView('thread'); setReplyingTo(null); setExpandedReplies({}); loadThreadPosts(t.id) }
+
+  // Deep link from a notification: /club/ID?thread=THREAD_ID opens that thread
+  // once threads have loaded. Runs once per thread id so Back still works.
+  const deepLinkedThread = useRef(null)
+  useEffect(() => {
+    const tid = router.query.thread
+    if (!tid || deepLinkedThread.current === tid || !threads.length) return
+    const t = threads.find(x => String(x.id) === String(tid))
+    if (!t) return
+    deepLinkedThread.current = tid
+    setSelBook(t.book_id); setDiscMode('chapters'); openThread(t)
+  }, [router.query.thread, threads])
   const openProfile = async m => {
     setProfileMember(m); setView('profile'); setProfileReplyCount(0)
     const { count } = await supabase.from('thread_replies').select('id', { count: 'exact', head: true }).eq('member_id', m.id)
