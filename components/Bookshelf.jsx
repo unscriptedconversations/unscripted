@@ -124,6 +124,67 @@ function Spine({ title, look, s = 1 }) {
   )
 }
 
+// Darken a #RRGGBB color by a fraction (for the cover's spine strip).
+function shade(hex, f) {
+  const n = parseInt(hex.slice(1), 16)
+  const ch = v => Math.max(0, Math.round(v * (1 - f)))
+  return '#' + [ch(n >> 16), ch((n >> 8) & 255), ch(n & 255)].map(v => v.toString(16).padStart(2, '0')).join('')
+}
+
+// Word-wrap a title onto a cover label: the largest size (13 down to 9) whose
+// greedy wrap fits the label's height. Last resort truncates the final line.
+function wrapCover(title, availW, availH) {
+  const words = String(title || '').trim().split(/\s+/)
+  for (let size = 13; size >= 9; size -= 0.5) {
+    const max = Math.floor(availW / (size * CW))
+    const maxLines = Math.floor(availH / (size * 1.2))
+    const lines = []
+    let cur = ''
+    for (const w of words) {
+      const next = cur ? cur + ' ' + w : w
+      if (next.length <= max) cur = next
+      else { if (cur) lines.push(cur); cur = w.length > max ? w.slice(0, max - 1) + '…' : w }
+    }
+    if (cur) lines.push(cur)
+    const clipped = words.some(w => w.length > max) // try a smaller size before clipping a word
+    if (lines.length <= maxLines && (!clipped || size === 9)) return { lines, size }
+    if (size === 9) return { lines: lines.slice(0, maxLines).map((l, i) => i === maxLines - 1 ? l.slice(0, max - 1) + '…' : l), size }
+  }
+}
+
+// Front-facing cartoon cover, same color and decoration as the book's spine on
+// the shelf, so a featured book visibly matches its spine. size scales it.
+export function BookCover({ title, size = 1 }) {
+  const look = spineLook(title)
+  const s = size > 0 ? size : 1
+  const W = 118, H = 160, cx = 20 + (W - 20) / 2
+  const labelX = 28, labelY = 30, labelW = W - 42, labelH = 86
+  const fit = wrapCover(title, labelW - 10, labelH - 10)
+  const midY = labelY + labelH / 2
+  const lineGap = fit.size * 1.2
+  const d = look.decor
+  return (
+    <svg width={W * s} height={H * s} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Cover of ${title}`} style={{ display: 'block', overflow: 'visible', flexShrink: 0 }}>
+      <g stroke={OUTLINE} strokeWidth="3" strokeLinejoin="round">
+        <path d={`M 6 6 Q 6 3 10 3 L ${W - 10} 4 Q ${W - 6} 4 ${W - 6} 8 L ${W - 5} ${H - 8} Q ${W - 5} ${H - 4} ${W - 9} ${H - 4} L 9 ${H - 3} Q 5 ${H - 3} 5 ${H - 7} Z`} fill={look.fill} />
+        <path d={`M 5 6 L 20 4 L 20 ${H - 4} L 5 ${H - 3} Z`} fill={shade(look.fill, 0.16)} />
+        <rect x={labelX} y={labelY} width={labelW} height={labelH} rx="6" fill={LABEL} strokeWidth="2.5" />
+      </g>
+      <text fill={OUTLINE} fontFamily="'Trebuchet MS', 'Arial Rounded MT Bold', 'Segoe UI', system-ui, sans-serif" fontSize={fit.size.toFixed(1)} fontWeight="700" textAnchor="middle" dominantBaseline="central">
+        {fit.lines.map((ln, i) => (
+          <tspan key={i} x={labelX + labelW / 2} y={midY + (i - (fit.lines.length - 1) / 2) * lineGap}>{ln}</tspan>
+        ))}
+      </text>
+      <g stroke={OUTLINE} strokeWidth="2.5" strokeLinecap="round" fill={LABEL}>
+        {d === 0 && <line x1={labelX} y1={H - 26} x2={labelX + labelW} y2={H - 26} />}
+        {d === 1 && <line x1={labelX} y1={H - 26} x2={labelX + labelW} y2={H - 26} strokeDasharray="4 5" />}
+        {d === 2 && <><circle cx={cx - 12} cy={H - 26} r="4" strokeWidth="2" /><circle cx={cx + 12} cy={H - 26} r="4" strokeWidth="2" /></>}
+        {d === 3 && <path d={`M ${cx} ${H - 34} L ${cx + 6} ${H - 26} L ${cx} ${H - 18} L ${cx - 6} ${H - 26} Z`} strokeWidth="2" strokeLinejoin="round" />}
+      </g>
+    </svg>
+  )
+}
+
 export default function Bookshelf({ books = [], shelfLinks = {}, onSelectBook, size = 1, emptyText }) {
   const s = size > 0 ? size : 1
   const router = useRouter()
