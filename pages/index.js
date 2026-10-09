@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
@@ -11,6 +11,8 @@ import { normalizeTag } from '../lib/tags'
 let olTimer
 let wTimer
 let mTimer
+let cbTimer
+let cbSeq = 0
 
 // olSeq orders async OL responses so a slow older request can't overwrite newer
 // results. The query cache itself now lives in lib/olSearch.js (shared with
@@ -82,7 +84,9 @@ export default function Landing() {
     if (to.href) return router.push(to.href)
   }
   const [clubs, setClubs] = useState([])
-  const [books, setBooks] = useState([])
+  // Titles of on-site books matching the current search, so Open Library
+  // results don't repeat them.
+  const siteTitles = useRef(new Set())
   const [trending, setTrending] = useState([])
   const [q, setQ] = useState('')
   const [sr, setSR] = useState(null)
@@ -140,16 +144,22 @@ export default function Landing() {
 
   async function loadData() {
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-    const [cR, bR, pR, tR] = await Promise.all([
-      supabase.from('clubs').select('*, club_members(count), books(title, author, status)'),
-      supabase.from('books').select('*, club:clubs(name)').order('created_at', { ascending: false }),
+    const [cR, fR, pR, tR] = await Promise.all([
+      // Capped: the page shows a handful of clubs, so load the newest 60 plus any
+      // featured ones (fetched separately so an older featured club still shows).
+      // Search hits clubs/books server-side instead of filtering a full load.
+      supabase.from('clubs').select('*, club_members(count), books(title, author, status)').order('created_at', { ascending: false }).limit(60),
+      supabase.from('clubs').select('*, club_members(count), books(title, author, status)').eq('featured', true).limit(6),
       supabase.from('posts').select('club_id, member_id, created_at').gte('created_at', since),
       // Ranked + slot-limited server-side (see trending_searches() in SQL)
       supabase.rpc('trending_searches'),
     ])
     setTrending((tR.data || []).map(r => r.term).filter(Boolean))
-    if (cR.data) setClubs(cR.data)
-    if (bR.data) setBooks(bR.data)
+    if (cR.data || fR.data) {
+      const byId = new Map()
+      for (const c of [...(fR.data || []), ...(cR.data || [])]) byId.set(c.id, c)
+      setClubs([...byId.values()])
+    }
     if (pR.data) {
       setRecentPosts(pR.data)
       const seen = {}
@@ -167,23 +177,36 @@ export default function Landing() {
   function doSearch(val) {
     setQ(val)
     if (val.length < 2) { setSR(null); setOlBooks([]); setWHits([]); setMHits([]); setOlLoading(false); return }
-    const lv = val.toLowerCase()
-    const nlv = normalizeTag(val)
-    const clubHits = clubs.filter(c =>
-      c.name.toLowerCase().includes(lv) ||
-      (c.description || '').toLowerCase().includes(lv) ||
-      (c.tags || []).some(t => t.toLowerCase().includes(lv))
-    )
-    const bookHits = books.filter(b =>
-      b.title.toLowerCase().includes(lv) ||
-      (b.author || '').toLowerCase().includes(lv) ||
-      (nlv && (b.tags || []).some(t => normalizeTag(t).includes(nlv)))
-    )
-    setSR({ clubs: clubHits, books: bookHits })
+    searchClubsBooks(val)
     setSrTab('all')
     searchOpenLibrary(val)
     searchWritings(val)
     searchMagazines(val)
+  }
+
+  // On-site clubs + books, queried server-side (debounced) so results stay
+  // complete however large the site gets. cbSeq drops stale responses.
+  function searchClubsBooks(val) {
+    const seq = ++cbSeq
+    clearTimeout(cbTimer)
+    cbTimer = setTimeout(async () => {
+      // Characters that would break a PostgREST or() filter become spaces
+      const term = val.replace(/[,()"{}\\*%]/g, ' ').replace(/\s+/g, ' ').trim()
+      if (term.length < 2) { if (seq === cbSeq) setSR({ clubs: [], books: [] }); return }
+      const like = `%${term}%`
+      const nterm = normalizeTag(term)
+      const [cR, bR] = await Promise.all([
+        supabase.from('clubs').select('*, club_members(count), books(title, author, status)')
+          .or(`name.ilike.${like},description.ilike.${like},tags.cs.{"${term}"}`).limit(8),
+        supabase.from('books').select('id, title, author, tags, club:clubs(name)')
+          .or(nterm ? `title.ilike.${like},author.ilike.${like},tags_norm.cs.{"${nterm}"}` : `title.ilike.${like},author.ilike.${like}`).limit(8),
+      ])
+      if (seq !== cbSeq) return
+      const bookHits = bR.data || []
+      siteTitles.current = new Set(bookHits.map(b => String(b.title || '').toLowerCase()))
+      setOlBooks(prev => prev.filter(o => !siteTitles.current.has(String(o.title || '').toLowerCase())))
+      setSR({ clubs: cR.data || [], books: bookHits })
+    }, 250)
   }
 
   // Live catalog search (any published book, not just ones on unscripted).
@@ -194,7 +217,7 @@ export default function Landing() {
     clearTimeout(olTimer)
 
     // Cache hit → instant. Skip the debounce and the network entirely.
-    const warm = olPeek(val, { excludeTitles: books.map(b => b.title) })
+    const warm = olPeek(val, { excludeTitles: [...siteTitles.current] })
     if (warm) {
       setOlBooks(warm)
       setOlLoading(false)
@@ -203,7 +226,7 @@ export default function Landing() {
 
     setOlLoading(true)
     olTimer = setTimeout(async () => {
-      const hits = await olSearch(val, { excludeTitles: books.map(b => b.title) })
+      const hits = await olSearch(val, { excludeTitles: [...siteTitles.current] })
       if (seq === olSeq) {
         setOlBooks(hits)
         setOlLoading(false)
