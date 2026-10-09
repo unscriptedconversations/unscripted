@@ -26,6 +26,16 @@ export default function Write() {
   const [saved, setSaved] = useState(false)
   const [suggesting, setSuggesting] = useState(false)
   const [suggestNote, setSuggestNote] = useState('')
+  // Only offer "Suggest themes" when AI is on. /api/themes answers an empty
+  // request with { disabled: true } when ANTHROPIC_API_KEY is unset; it checks
+  // the key before anything else, so this probe never calls the model.
+  const [aiReady, setAiReady] = useState(false)
+  useEffect(() => {
+    let live = true
+    fetch('/api/themes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(r => r.json()).then(d => { if (live && !d.disabled) setAiReady(true) }).catch(() => {})
+    return () => { live = false }
+  }, [])
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -186,9 +196,9 @@ export default function Write() {
 
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
           <label style={fl}>Themes (optional)</label>
-          <button type="button" onClick={suggestThemes} disabled={suggesting} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, color: 'var(--tc)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', opacity: suggesting ? 0.5 : 1 }}>
+          {aiReady && <button type="button" onClick={suggestThemes} disabled={suggesting} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, color: 'var(--tc)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', opacity: suggesting ? 0.5 : 1 }}>
             {suggesting ? 'Suggesting…' : 'Suggest themes'}
-          </button>
+          </button>}
         </div>
         <input style={fi} placeholder="grief, identity, coming of age" value={tagsInput} onChange={e => setTagsInput(e.target.value)} />
         <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginTop: -16, marginBottom: 28, lineHeight: 1.5 }}>{suggestNote || 'Comma-separated. Helps readers find your writing by theme.'}</div>
