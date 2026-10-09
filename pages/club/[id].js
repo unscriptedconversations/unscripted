@@ -142,6 +142,7 @@ export default function ClubPage() {
   const [discMode, setDiscMode] = useState('chapters')
   const [filterTheme, setFilterTheme] = useState(null)
   const [newPost, setNewPost] = useState('')
+  const [newTag, setNewTag] = useState('community') // compose tag; resets after posting
   const [newSit, setNewSit] = useState('')
   const [newThemes, setNewThemes] = useState('')
   const [profileMember, setProfileMember] = useState(null)
@@ -342,13 +343,13 @@ export default function ClubPage() {
 
   async function submitPost() {
     if (!newPost.trim() || !currentUser) return
-    const tag = document.getElementById('club-tag-select')?.value || 'community'
+    const tag = newTag || 'community'
     await supabase.from('posts').insert({ member_id: currentUser.id, content: newPost.trim(), tag, sitting_with: newSit.trim() || null, themes: newThemes.trim() || null, club_id: id })
     notifyMentions({ text: newPost, members, actorId: currentUser.id, link: `/club/${id}`, preview: newPost.trim().slice(0, 60) })
     notifyClubPost({ recipients: members.map(m => m.id), actorId: currentUser.id, clubId: id, clubName: club?.name })
     await bumpWriteStreak()
     await markHasPosted()
-    setNewPost(''); setNewSit(''); setNewThemes(''); loadClub()
+    setNewPost(''); setNewSit(''); setNewThemes(''); setNewTag('community'); loadClub()
   }
 
   async function submitThreadPost() {
@@ -824,7 +825,7 @@ export default function ClubPage() {
               </div>}
             </div>}
             {allFeedThemes.length > 0 && <div className="theme-filter"><span className="section-title" style={{ marginRight: 8 }}>Themes</span><ThemePill t="All" active={!filterTheme} onClick={() => setFilterTheme(null)} />{allFeedThemes.map(t => <ThemePill key={t} t={t} active={filterTheme === t} onClick={() => setFilterTheme(filterTheme === t ? null : t)} />)}</div>}
-            {(isMember || isHost) ? <div className="compose"><div className="compose-row"><MemberAvatar member={currentUser} size={36} /><textarea id="feed-compose" className="compose-input" placeholder="Say what's on your mind..." value={newPost} onChange={e => setNewPost(e.target.value)} rows={2} /></div><div className="compose-depth"><div className="compose-depth-label">Optional — add depth</div><div className="compose-depth-row"><span className="compose-depth-name">Sitting with</span><input className="compose-depth-input italic" placeholder="A line from the book..." value={newSit} onChange={e => setNewSit(e.target.value)} /></div><div className="compose-depth-row"><span className="compose-depth-name">Themes</span><input className="compose-depth-input" placeholder="survival, identity (comma separated)" value={newThemes} onChange={e => setNewThemes(e.target.value)} /></div></div><div className="compose-foot"><select className="tag-select" id="club-tag-select"><option value="community">Community</option><option value="reflection">Reflection</option><option value="book">Book</option></select><button className="share-btn" disabled={!newPost.trim()} onClick={submitPost}>Share</button></div></div> : currentUser ? <div className="compose compose-cta" onClick={() => { if (club?.invite_code) router.push('/join/' + club.invite_code) }}><p className="compose-placeholder">Join this club to post…</p></div> : <div className="compose compose-cta" onClick={() => router.push('/signup')}><p className="compose-placeholder">Join to share your thoughts...</p></div>}
+            {(isMember || isHost) ? <div className="compose"><div className="compose-row"><MemberAvatar member={currentUser} size={36} /><textarea id="feed-compose" className="compose-input" placeholder="Say what's on your mind..." value={newPost} onChange={e => setNewPost(e.target.value)} rows={2} /></div><div className="compose-depth"><div className="compose-depth-label">Optional — add depth</div><div className="compose-depth-row"><span className="compose-depth-name">Sitting with</span><input className="compose-depth-input italic" placeholder="A line from the book..." value={newSit} onChange={e => setNewSit(e.target.value)} /></div><div className="compose-depth-row"><span className="compose-depth-name">Themes</span><input className="compose-depth-input" placeholder="survival, identity (comma separated)" value={newThemes} onChange={e => setNewThemes(e.target.value)} /></div></div><div className="compose-foot"><select className="tag-select" id="club-tag-select" value={newTag} onChange={e => setNewTag(e.target.value)}><option value="community">Community</option><option value="reflection">Reflection</option><option value="book">Book</option></select><button className="share-btn" disabled={!newPost.trim()} onClick={submitPost}>Share</button></div></div> : currentUser ? <div className="compose compose-cta" onClick={() => { if (club?.invite_code) router.push('/join/' + club.invite_code) }}><p className="compose-placeholder">Join this club to post…</p></div> : <div className="compose compose-cta" onClick={() => router.push('/signup')}><p className="compose-placeholder">Join to share your thoughts...</p></div>}
             {filteredPosts.map(p => { const m = p.member || {}; const th = parseThemes(p.themes); return <div key={p.id} className="feed-card"><div className="feed-header"><MemberAvatar member={m} size={32} /><div><span className="feed-name" onClick={() => openProfile(m)}>{m.first_name}</span><span className="feed-time">{timeAgo(p.created_at)}</span></div><span style={{ marginLeft: 'auto' }}><Tag tag={p.tag} /></span></div><div className="feed-body">{renderContent(p.content)}</div>{p.sitting_with && <div className="sitting-with"><div className="sitting-label">Sitting with</div><div className="sitting-text">"{p.sitting_with}"</div></div>}{th.length > 0 && <div className="theme-pills">{th.map(t => <ThemePill key={t} t={t} active={filterTheme === t} onClick={() => setFilterTheme(filterTheme === t ? null : t)} />)}</div>}<div className="feed-actions"><button className={`feed-action ${isLiked(p.id) ? 'liked' : ''}`} onClick={() => toggleLike(p.id)}>{isLiked(p.id) ? '\u2665' : '\u2661'} {likeCount(p.id)}</button></div></div> })}
           </div>
           <div className="sidebar">
