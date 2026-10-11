@@ -332,7 +332,6 @@ export default function Landing() {
           <div className="brand"><Logo /></div>
           <div className="nav-links">
             <button className="nav-btn active">Explore</button>
-            <button className="nav-btn" onClick={() => router.push('/writing')}>Writing</button>
             {BRIDGE_ENABLED && <button className="nav-btn" onClick={() => router.push('/bridge')}>Bridge</button>}
             {!authReady ? (
               <div aria-hidden="true" style={{ minWidth: 120 }} />
