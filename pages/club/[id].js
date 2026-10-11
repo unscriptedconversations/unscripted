@@ -8,6 +8,7 @@ import ClubChat from '../../components/ClubChat'
 import { notifyMentions, createNotification, notifyClubPost } from '../../lib/notify'
 import ManualBookAdd from '../../components/ManualBookAdd'
 import Bookshelf, { BookCover } from '../../components/Bookshelf'
+import BookPicker from '../../components/BookPicker'
 import { normalizeTags } from '../../lib/tags'
 
 function timeAgo(date) {
@@ -691,9 +692,12 @@ export default function ClubPage() {
           </div>
 
           <label className="field-label">Favorite book</label>
-          <input className="field-input" value={editForm.fav_book} onChange={e => setEditForm(d => ({ ...d, fav_book: e.target.value }))} placeholder="A book that shaped you" />
-          <label className="field-label">Author</label>
-          <input className="field-input" value={editForm.fav_book_author} onChange={e => setEditForm(d => ({ ...d, fav_book_author: e.target.value }))} placeholder="Who wrote it" />
+          <BookPicker
+            title={editForm.fav_book}
+            author={editForm.fav_book_author}
+            onChange={({ title, author }) => setEditForm(d => ({ ...d, fav_book: title, fav_book_author: author }))}
+            placeholder="Search for a book that shaped you"
+          />
           <label className="field-label">In one word</label>
           <input className="field-input" value={editForm.one_word} onChange={e => setEditForm(d => ({ ...d, one_word: e.target.value }))} placeholder="Describe yourself as a reader" />
           <label className="field-label">Cartoon character</label>
