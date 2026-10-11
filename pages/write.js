@@ -24,6 +24,8 @@ export default function Write() {
   const [isPublished, setIsPublished] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [suggesting, setSuggesting] = useState(false)
   const [suggestNote, setSuggestNote] = useState('')
   // Only offer "Suggest themes" when AI is on. /api/themes answers an empty
@@ -216,6 +218,29 @@ export default function Write() {
           <button style={{ ...btn, flex: 1, opacity: (title.trim() && content.trim() && !overLimit) ? 1 : 0.4 }} disabled={saving || !title.trim() || !content.trim() || overLimit} onClick={() => save(true)}>Publish</button>
         </div>
         {saved && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--sg)', marginTop: 12, textAlign: 'center' }}>Saved</div>}
+
+        {/* Delete (existing pieces only). remove_content() in SQL checks you're the author. */}
+        {writingId && <div style={{ marginTop: 40, paddingTop: 20, borderTop: '1px solid var(--bd)', textAlign: 'center' }}>
+          {!confirmDelete ? (
+            <button onClick={() => setConfirmDelete(true)} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--txD)', background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
+              Delete this {isPublished ? 'piece' : 'draft'}
+            </button>
+          ) : (
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--ink)' }}>
+              <div style={{ marginBottom: 12 }}>Delete {title.trim() ? <em>{title.trim()}</em> : 'this piece'} for good? This can{'\u2019'}t be undone.</div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+                <button style={btnO} disabled={deleting} onClick={() => setConfirmDelete(false)}>Keep it</button>
+                <button style={{ ...btn, background: '#A0603E' }} disabled={deleting} onClick={async () => {
+                  setDeleting(true)
+                  const { error } = await supabase.rpc('remove_content', { p_kind: 'writing', p_id: writingId })
+                  setDeleting(false)
+                  if (error) { window.alert('Sorry, that couldn\u2019t be deleted. Please try again.'); return }
+                  router.push(`/profile/${currentUser.id}`)
+                }}>{deleting ? 'Deleting\u2026' : 'Delete'}</button>
+              </div>
+            </div>
+          )}
+        </div>}
       </div>
     </div>
   )
