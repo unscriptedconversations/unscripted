@@ -83,6 +83,10 @@ export default function ProfilePage() {
   }, [])
 
   useEffect(() => { if (id) load() }, [id])
+  // ?tab=account (e.g. from the nav's Settings cog) opens the Account tab on your own profile
+  useEffect(() => {
+    if (router.query.tab === 'account' && currentUser?.id && currentUser.id === id) setTab('account')
+  }, [router.query.tab, currentUser?.id, id])
   useEffect(() => { if (currentUser && id) checkFollowing() }, [currentUser, id])
 
   async function load() {
