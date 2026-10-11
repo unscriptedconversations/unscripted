@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
+import NotificationBell from '../components/NotificationBell'
+import SettingsMenu from '../components/SettingsMenu'
 import { BRIDGE_ENABLED } from '../lib/flags'
 import { magazineCover } from '../lib/magazineCover'
 import { olSearch } from '../lib/olSearch'
@@ -56,6 +58,20 @@ export default function SearchPage() {
   const [olLoading, setOlLoading] = useState(false)
   const [ran, setRan] = useState(false)
   const lastLogged = useRef('')
+
+  // Nav: who's logged in. authReady keeps the nav blank until known (no
+  // "Log in" flash for members), same as the homepage.
+  const [currentUser, setCurrentUser] = useState(null)
+  const [authReady, setAuthReady] = useState(false)
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      try {
+        if (!session) return
+        const { data: m } = await supabase.from('members').select('*').eq('id', session.user.id).single()
+        if (m) setCurrentUser(m)
+      } finally { setAuthReady(true) }
+    })
+  }, [])
 
   // Seed from ?q= (homepage "see all results" passes it through)
   useEffect(() => {
@@ -189,7 +205,22 @@ export default function SearchPage() {
           <div className="brand" onClick={() => router.push('/')}><Logo /></div>
           <div className="nav-links">
             <button className="nav-btn" onClick={() => router.push('/')}>Explore</button>
-            <button className="nav-btn" onClick={() => router.push('/writing')}>Writing</button>
+            {!authReady ? (
+              <div aria-hidden="true" style={{ minWidth: 120 }} />
+            ) : currentUser ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <NotificationBell currentUser={currentUser} />
+                <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
+                  <span className="user-nav-name">{currentUser.first_name}</span>
+                </div>
+                <SettingsMenu currentUser={currentUser} onLogout={() => setCurrentUser(null)} />
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <span style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 600, color: 'var(--ink)', cursor: 'pointer' }} onClick={() => router.push('/login')}>Log in</span>
+                <button className="join-btn" onClick={() => router.push('/signup')}>Join</button>
+              </div>
+            )}
           </div>
         </nav>
 
