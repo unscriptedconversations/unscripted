@@ -100,6 +100,23 @@ export default function Signup() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router.isReady, router.query.bookTitle])
 
+  // "Popular on unscripted" topics (popular_topics() in SQL): tags real, lively
+  // clubs use, ranked by how many members search them. Shown above the
+  // hand-picked categories, minus anything already in those. Loaded once, the
+  // first time the topics screen opens.
+  const [popularTopics, setPopularTopics] = useState([])
+  const popularLoaded = useRef(false)
+  useEffect(() => {
+    if (interestStep !== 2 || popularLoaded.current) return
+    popularLoaded.current = true
+    const curated = new Set(TOPIC_CATS.flatMap(c => c.tags).map(normalizeTag))
+    const titleCase = t => t.replace(/(^|\s)(\p{L})/gu, (m, sp, ch) => sp + ch.toUpperCase())
+    supabase.rpc('popular_topics', { p_limit: 12 }).then(({ data }) => {
+      const picks = (data || []).map(r => r.topic).filter(t => t && !curated.has(normalizeTag(t)))
+      setPopularTopics(picks.slice(0, 6).map(titleCase))
+    }).catch(() => {})
+  }, [interestStep])
+
   // ── Styles ─────────────────────────────────────────────────────────────────
   const fl  = { fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2.5, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 10, display: 'block' }
   const fi  = { width: '100%', padding: '14px 18px', background: 'var(--bg)', border: '1px solid var(--bd2)', borderRadius: 10, fontFamily: 'var(--ui)', fontSize: 15, color: 'var(--ink)', outline: 'none', marginBottom: 24, boxSizing: 'border-box' }
@@ -413,7 +430,7 @@ export default function Signup() {
             Pick at least 3 and we'll show you clubs you'll actually want to be in.
           </div>
 
-          {TOPIC_CATS.map(cat => (
+          {(popularTopics.length ? [{ label: 'Popular on unscripted', tags: popularTopics }, ...TOPIC_CATS] : TOPIC_CATS).map(cat => (
             <div key={cat.label} style={{ marginBottom: 28 }}>
               <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 14 }}>
                 {cat.label}
