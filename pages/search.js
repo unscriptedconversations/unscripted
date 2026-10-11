@@ -47,7 +47,8 @@ export default function SearchPage() {
   const [books, setBooks] = useState([])
   const [magazines, setMagazines] = useState([])
   const [writings, setWritings] = useState([])
-  const [authors, setAuthors] = useState([])
+  const [authors, setAuthors] = useState([]) // members (shown under People)
+  const [ranTerm, setRanTerm] = useState('')   // the term the current results are for
   const [bridges, setBridges] = useState([])
   const [olBooks, setOlBooks] = useState([])
   const [tab, setTab] = useState('all')
@@ -82,7 +83,7 @@ export default function SearchPage() {
 
     const [cR, bR, mR, wR, aR, brR] = await Promise.all([
       supabase.from('clubs').select('id, name, description, privacy, tagline, tags').or(`name.ilike.${like},description.ilike.${like},tagline.ilike.${like},tags.cs.{${term}}`).limit(20),
-      supabase.from('books').select('id, title, author, tags, club:clubs(name)').or(booksOr).limit(20),
+      supabase.from('books').select('id, title, author, tags, club_id, club:clubs(name)').or(booksOr).limit(20),
       supabase.from('magazines').select('id, title, publisher, description, tags, cover_url, website, founded').or(`title.ilike.${like},publisher.ilike.${like},description.ilike.${like},tags.cs.{${term}}`).limit(20),
       supabase.from('writings').select('id, title, content, format, published_at, member_id, tags, author:members(id, first_name, last_name, initials, color)').eq('is_published', true).or(`title.ilike.${like},content.ilike.${like},tags.cs.{${term}}`).limit(20),
       supabase.from('members').select('id, first_name, last_name, initials, color').or('status.is.null,status.neq.disabled').or(`first_name.ilike.${like},last_name.ilike.${like}`).limit(12),
@@ -90,7 +91,18 @@ export default function SearchPage() {
         ? supabase.from('bridge_threads').select('*').or(`title.ilike.${like},anchor.ilike.${like}`).limit(12)
         : Promise.resolve({ data: [] }),
     ])
-    setClubs(cR.data || [])
+    // Clubs also match when they're reading a matching book (e.g. searching an
+    // author finds the clubs reading their books), labelled with that book.
+    const bookHits = bR.data || []
+    const have = new Set((cR.data || []).map(c => c.id))
+    const extraIds = [...new Set(bookHits.map(b => b.club_id).filter(id => id && !have.has(id)))].slice(0, 12)
+    let extra = []
+    if (extraIds.length) {
+      const { data: xc } = await supabase.from('clubs').select('id, name, description, privacy, tagline, tags').in('id', extraIds)
+      extra = (xc || []).map(c => ({ ...c, reading: bookHits.find(b => b.club_id === c.id)?.title }))
+    }
+    setClubs([...(cR.data || []), ...extra])
+    setRanTerm(term)
     setBooks(bR.data || [])
     setMagazines(mR.data || [])
     setWritings(wR.data || [])
@@ -143,7 +155,28 @@ export default function SearchPage() {
   function submit(e) { e?.preventDefault?.(); runSearch() }
 
   const show = t => tab === 'all' || tab === t
-  const totalOnSite = clubs.length + books.length + magazines.length + writings.length + authors.length + bridges.length + olBooks.length
+
+  // Book authors matching the search, from on-site books and the Open Library
+  // results. Each links to /author/[name]. On-site authors rank first.
+  const bookAuthors = (() => {
+    const lv = ranTerm.trim().toLowerCase()
+    if (lv.length < 2) return []
+    const byName = new Map()
+    const add = (author, title, onSite) => {
+      for (const nm of String(author || '').split(',').map(x => x.trim()).filter(Boolean)) {
+        if (!nm.toLowerCase().includes(lv)) continue
+        const k = nm.toLowerCase()
+        const a = byName.get(k) || { name: nm, titles: new Set(), onSite: false }
+        if (title) a.titles.add(title)
+        a.onSite = a.onSite || onSite
+        byName.set(k, a)
+      }
+    }
+    books.forEach(b => add(b.author, b.title, true))
+    olBooks.forEach(b => add(b.author, b.title, false))
+    return [...byName.values()].sort((a, b) => (b.onSite - a.onSite) || (b.titles.size - a.titles.size)).slice(0, 8)
+  })()
+  const totalOnSite = clubs.length + books.length + magazines.length + writings.length + authors.length + bookAuthors.length + bridges.length + olBooks.length
   const preview = t => (t || '').length > 160 ? t.slice(0, 160) + '…' : t
 
   const rowStyle = { display: 'flex', alignItems: 'center', gap: 14, padding: '16px 20px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 12, marginBottom: 10, cursor: 'pointer' }
@@ -175,7 +208,7 @@ export default function SearchPage() {
 
           {/* Type filter */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '16px 0 8px' }}>
-            {[['all', 'All'], ['books', 'Books'], ['magazines', 'Magazines'], ['clubs', 'Clubs'], ['writings', 'Writing'], ...(BRIDGE_ENABLED ? [['bridges', 'Bridge']] : []), ['authors', 'Authors']].map(([k, l]) => (
+            {[['all', 'All'], ['books', 'Books'], ['magazines', 'Magazines'], ['clubs', 'Clubs'], ['writings', 'Writing'], ...(BRIDGE_ENABLED ? [['bridges', 'Bridge']] : []), ['authors', 'Authors'], ['people', 'People']].map(([k, l]) => (
               <button key={k} onClick={() => setTab(k)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: tab === k ? 'var(--tc)' : 'var(--txD)', background: tab === k ? 'var(--tcD)' : 'transparent', border: '1px solid ' + (tab === k ? 'var(--tc)' : 'var(--bd)'), borderRadius: 100, padding: '7px 16px', cursor: 'pointer' }}>{l}</button>
             ))}
           </div>
@@ -193,6 +226,7 @@ export default function SearchPage() {
               <div key={c.id} style={rowStyle} onClick={() => router.push(`/club/${c.id}`)}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>{c.name}</div>
+                  {c.reading && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--tc)', marginBottom: 2 }}>Reading {c.reading}</div>}
                   <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>{c.description}</div>
                   {(c.tags || []).length > 0 && <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>{c.tags.slice(0, 3).map(t => <span key={t} style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 600, color: 'var(--sg)', background: 'rgba(94,122,98,0.1)', borderRadius: 100, padding: '2px 8px' }}>{t}</span>)}</div>}
                 </div>
@@ -248,8 +282,26 @@ export default function SearchPage() {
             ))}
           </div>}
 
-          {/* AUTHORS */}
-          {show('authors') && authors.length > 0 && <div>
+          {/* BOOK AUTHORS */}
+          {show('authors') && bookAuthors.length > 0 && <div>
+            <SectionLabel>Authors</SectionLabel>
+            {bookAuthors.map(a => (
+              <div key={a.name} style={rowStyle} onClick={() => router.push(`/author/${encodeURIComponent(a.name)}`)}>
+                <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--tcD)', color: 'var(--tc)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, flexShrink: 0 }}>
+                  {a.name.split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase()}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>{a.name}</div>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {[...a.titles].slice(0, 2).join(', ')}{a.onSite ? ' · read on unscripted' : ''}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>}
+
+          {/* PEOPLE (members) */}
+          {show('people') && authors.length > 0 && <div>
             <SectionLabel>People</SectionLabel>
             {authors.map(a => (
               <div key={a.id} style={rowStyle} onClick={() => router.push(`/profile/${a.id}`)}>
