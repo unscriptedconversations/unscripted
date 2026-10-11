@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase'
 import { updateColor } from '../../lib/auth'
 import Logo from '../../components/Logo'
 import NotificationBell from '../../components/NotificationBell'
+import SettingsMenu from '../../components/SettingsMenu'
 import Bookshelf from '../../components/Bookshelf'
 import PinnedPapers from '../../components/PinnedPapers'
 import { createNotification } from '../../lib/notify'
@@ -254,7 +255,7 @@ export default function ProfilePage() {
       <div style={{ maxWidth: 640, margin: '0 auto', padding: '0 28px 80px' }}>
         <div style={{ padding: '32px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ cursor: 'pointer' }} onClick={() => router.push('/')}><Logo /></div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>{isOwner && <NotificationBell currentUser={currentUser} />}{isOwner && <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer' }} onClick={() => router.push('/write')}>+ Write</button>}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>{isOwner && <NotificationBell currentUser={currentUser} />}{isOwner && <button style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 18px', cursor: 'pointer' }} onClick={() => router.push('/write')}>+ Write</button>}{isOwner && <SettingsMenu currentUser={currentUser} onLogout={() => router.push('/')} />}</div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 12 }}>
@@ -307,7 +308,7 @@ export default function ProfilePage() {
         </div>
 
         <div ref={tabsRef} style={{ display: 'flex', borderBottom: '1px solid var(--bd)', marginBottom: 24, scrollMarginTop: 16 }}>
-          {[['writing', 'Writing'], ['clubs', 'Clubs'], ...(isOwner ? [['account', 'Account']] : [])].map(([k, l]) => (
+          {[['writing', 'Writing'], ['clubs', 'Clubs']].map(([k, l]) => ( // Account lives behind the settings cog
             <button key={k} onClick={() => setTab(k)} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: tab === k ? 'var(--ink)' : 'var(--txD)', background: 'none', border: 'none', cursor: 'pointer', padding: '12px 20px 12px 0', position: 'relative' }}>
               {l}{tab === k && <div style={{ position: 'absolute', bottom: -1, left: 0, right: 20, height: 2, background: 'var(--tc)', borderRadius: 2 }} />}
             </button>
@@ -324,6 +325,10 @@ export default function ProfilePage() {
         </div>}
 
         {isOwner && tab === 'account' && <div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <div style={{ fontFamily: 'var(--hd)', fontSize: 22, fontWeight: 600, color: 'var(--ink)' }}>Account settings</div>
+            <button onClick={() => { setTab('writing'); router.replace(`/profile/${id}`, undefined, { shallow: true }) }} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--txD)', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>← Back to profile</button>
+          </div>
           <div style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '20px 22px', marginBottom: 12 }}>
             <div style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, color: 'var(--ink)', marginBottom: 4 }}>Email</div>
             <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>{member.email}</div>
