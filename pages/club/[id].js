@@ -697,7 +697,7 @@ export default function ClubPage() {
           <label className="field-label">In one word</label>
           <input className="field-input" value={editForm.one_word} onChange={e => setEditForm(d => ({ ...d, one_word: e.target.value }))} placeholder="Describe yourself as a reader" />
           <label className="field-label">Cartoon character</label>
-          <input className="field-input" value={editForm.fav_cartoon} onChange={e => setEditForm(d => ({ ...d, fav_cartoon: e.target.value }))} placeholder="Your spirit character" />
+          <input className="field-input" value={editForm.fav_cartoon} onChange={e => setEditForm(d => ({ ...d, fav_cartoon: e.target.value }))} placeholder="The cartoon character you relate to most" />
 
           <button className="modal-submit" onClick={saveProfile}>Save changes</button>
         </div>
