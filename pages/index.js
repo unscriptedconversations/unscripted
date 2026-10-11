@@ -3,6 +3,7 @@ import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
 import NotificationBell from '../components/NotificationBell'
+import SettingsMenu from '../components/SettingsMenu'
 import { BRIDGE_ENABLED } from '../lib/flags'
 import { magazineCover } from '../lib/magazineCover'
 import { olSearch, olPeek } from '../lib/olSearch'
@@ -341,7 +342,7 @@ export default function Landing() {
                 <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
                   <span className="user-nav-name">{currentUser.first_name}</span>
                 </div>
-                <span style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--txD)', cursor: 'pointer' }} onClick={async () => { try { await supabase.auth.signOut({ scope: 'local' }) } catch (e) {} setCurrentUser(null) }}>Log out</span>
+                <SettingsMenu currentUser={currentUser} onLogout={() => setCurrentUser(null)} />
               </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
