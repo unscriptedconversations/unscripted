@@ -155,6 +155,8 @@ export default function ClubPage() {
   const [replyingTo, setReplyingTo] = useState(null)
   const [replyText, setReplyText] = useState('')
   const [expandedReplies, setExpandedReplies] = useState({})
+  const [confirmDel, setConfirmDel] = useState(null) // 'post:ID' | 'reply:ID' awaiting "Delete?" confirmation
+  const [deleting, setDeleting] = useState(false)
   const [showAddBook, setShowAddBook] = useState(false)
   const [showIsbn, setShowIsbn] = useState(false)
   const [bkQ, setBkQ] = useState('')
@@ -485,6 +487,33 @@ export default function ClubPage() {
 
   const isLiked = pid => currentUser && likes.some(l => l.post_id === pid && l.member_id === currentUser.id)
   const likeCount = pid => likes.filter(l => l.post_id === pid).length
+
+  // Deleting: authors delete their own posts/replies; hosts can remove anyone's
+  // in this club. remove_content() in SQL enforces the same rules server-side.
+  const canDelete = authorId => !!currentUser && (authorId === currentUser.id || isHost)
+  async function removeItem(kind, itemId) {
+    setDeleting(true)
+    const { error } = await supabase.rpc('remove_content', { p_kind: kind, p_id: itemId })
+    setDeleting(false); setConfirmDel(null)
+    if (error) { window.alert('Sorry, that couldn\u2019t be deleted. Please try again.'); return }
+    if (kind === 'post') setPosts(ps => ps.filter(p => p.id !== itemId))
+    else if (activeThread) loadThreadPosts(activeThread.id)
+  }
+  const delBtn = { fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, color: 'var(--txD)', background: 'none', border: 'none', padding: '4px 6px', cursor: 'pointer' }
+  // Called as a plain function (not <Component/>) so React doesn't remount it every render
+  function deleteControl(kind, itemId, authorId, style = {}) {
+    if (!canDelete(authorId)) return null
+    const key = kind + ':' + itemId
+    const own = authorId === currentUser.id
+    if (confirmDel === key) return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', ...style }}>
+        {own ? 'Delete?' : 'Remove for everyone?'}
+        <button style={{ ...delBtn, color: '#A0603E', fontWeight: 700 }} disabled={deleting} onClick={() => removeItem(kind, itemId)}>{deleting ? '…' : 'Yes'}</button>
+        <button style={delBtn} disabled={deleting} onClick={() => setConfirmDel(null)}>Cancel</button>
+      </span>
+    )
+    return <button style={{ ...delBtn, ...style }} onClick={() => setConfirmDel(key)}>{own ? 'Delete' : 'Remove'}</button>
+  }
   const parseThemes = str => (str || '').split(',').map(t => t.trim()).filter(Boolean)
 
   const openThread = t => { setActiveThread(t); setView('thread'); setReplyingTo(null); setExpandedReplies({}); loadThreadPosts(t.id) }
@@ -830,7 +859,7 @@ export default function ClubPage() {
             </div>}
             {allFeedThemes.length > 0 && <div className="theme-filter"><span className="section-title" style={{ marginRight: 8 }}>Themes</span><ThemePill t="All" active={!filterTheme} onClick={() => setFilterTheme(null)} />{allFeedThemes.map(t => <ThemePill key={t} t={t} active={filterTheme === t} onClick={() => setFilterTheme(filterTheme === t ? null : t)} />)}</div>}
             {(isMember || isHost) ? <div className="compose"><div className="compose-row"><MemberAvatar member={currentUser} size={36} /><textarea id="feed-compose" className="compose-input" placeholder="Say what's on your mind..." value={newPost} onChange={e => setNewPost(e.target.value)} rows={2} /></div><div className="compose-depth"><div className="compose-depth-label">Optional — add depth</div><div className="compose-depth-row"><span className="compose-depth-name">Sitting with</span><input className="compose-depth-input italic" placeholder="A line from the book..." value={newSit} onChange={e => setNewSit(e.target.value)} /></div><div className="compose-depth-row"><span className="compose-depth-name">Themes</span><input className="compose-depth-input" placeholder="survival, identity (comma separated)" value={newThemes} onChange={e => setNewThemes(e.target.value)} /></div></div><div className="compose-foot"><select className="tag-select" id="club-tag-select" value={newTag} onChange={e => setNewTag(e.target.value)}><option value="community">Community</option><option value="reflection">Reflection</option><option value="book">Book</option></select><button className="share-btn" disabled={!newPost.trim()} onClick={submitPost}>Share</button></div></div> : currentUser ? <div className="compose compose-cta" onClick={() => { if (club?.invite_code) router.push('/join/' + club.invite_code) }}><p className="compose-placeholder">Join this club to post…</p></div> : <div className="compose compose-cta" onClick={() => router.push('/signup')}><p className="compose-placeholder">Join to share your thoughts...</p></div>}
-            {filteredPosts.map(p => { const m = p.member || {}; const th = parseThemes(p.themes); return <div key={p.id} className="feed-card"><div className="feed-header"><MemberAvatar member={m} size={32} /><div><span className="feed-name" onClick={() => openProfile(m)}>{m.first_name}</span><span className="feed-time">{timeAgo(p.created_at)}</span></div><span style={{ marginLeft: 'auto' }}><Tag tag={p.tag} /></span></div><div className="feed-body">{renderContent(p.content)}</div>{p.sitting_with && <div className="sitting-with"><div className="sitting-label">Sitting with</div><div className="sitting-text">"{p.sitting_with}"</div></div>}{th.length > 0 && <div className="theme-pills">{th.map(t => <ThemePill key={t} t={t} active={filterTheme === t} onClick={() => setFilterTheme(filterTheme === t ? null : t)} />)}</div>}<div className="feed-actions"><button className={`feed-action ${isLiked(p.id) ? 'liked' : ''}`} onClick={() => toggleLike(p.id)}>{isLiked(p.id) ? '\u2665' : '\u2661'} {likeCount(p.id)}</button></div></div> })}
+            {filteredPosts.map(p => { const m = p.member || {}; const th = parseThemes(p.themes); return <div key={p.id} className="feed-card"><div className="feed-header"><MemberAvatar member={m} size={32} /><div><span className="feed-name" onClick={() => openProfile(m)}>{m.first_name}</span><span className="feed-time">{timeAgo(p.created_at)}</span></div><span style={{ marginLeft: 'auto' }}><Tag tag={p.tag} /></span></div><div className="feed-body">{renderContent(p.content)}</div>{p.sitting_with && <div className="sitting-with"><div className="sitting-label">Sitting with</div><div className="sitting-text">"{p.sitting_with}"</div></div>}{th.length > 0 && <div className="theme-pills">{th.map(t => <ThemePill key={t} t={t} active={filterTheme === t} onClick={() => setFilterTheme(filterTheme === t ? null : t)} />)}</div>}<div className="feed-actions"><button className={`feed-action ${isLiked(p.id) ? 'liked' : ''}`} onClick={() => toggleLike(p.id)}>{isLiked(p.id) ? '\u2665' : '\u2661'} {likeCount(p.id)}</button>{deleteControl('post', p.id, p.member_id, { marginLeft: 'auto' })}</div></div> })}
           </div>
           <div className="sidebar">
             <div className="sidebar-section">{clubShelf}</div>
@@ -900,12 +929,13 @@ export default function ClubPage() {
           {tThemes.length > 0 && <div className="theme-filter">{tThemes.map(t => <ThemePill key={t} t={t} />)}</div>}
 
           {topLevelTP.length > 0 ? topLevelTP.map(po => { const m = po.member || {}; const th = parseThemes(po.themes); const reps = getReplies(po.id); return <div key={po.id} style={{ marginBottom: 24 }}>
+            {po.removed_at ? <div className="feed-card"><div className="feed-body" style={{ fontStyle: 'italic', color: 'var(--txD)' }}>This reply was removed.</div><div className="feed-actions">{reps.length > 0 && <button className="feed-action" style={{ marginLeft: 'auto' }} onClick={() => setExpandedReplies(p => ({ ...p, [po.id]: !p[po.id] }))}>{expandedReplies[po.id] ? 'Hide' : 'Show'} {reps.length} {reps.length === 1 ? 'reply' : 'replies'}</button>}</div></div> :
             <div className="feed-card"><div className="feed-header"><MemberAvatar member={m} size={32} /><div><span className="feed-name" onClick={() => openProfile(m)}>{m.first_name}</span><span className="feed-time">{timeAgo(po.created_at)}</span></div></div><div className="feed-body">{renderContent(po.content)}</div>{po.sitting_with && <div className="sitting-with"><div className="sitting-label">Sitting with</div><div className="sitting-text">"{po.sitting_with}"</div></div>}{th.length > 0 && <div className="theme-pills">{th.map(t => <ThemePill key={t} t={t} />)}</div>}
-            <div className="feed-actions"><button className="feed-action" onClick={() => { setReplyingTo(replyingTo === po.id ? null : po.id); setReplyText('') }}>↩ Reply</button>{reps.length > 0 && <button className="feed-action" style={{ marginLeft: 'auto' }} onClick={() => setExpandedReplies(p => ({ ...p, [po.id]: !p[po.id] }))}>{expandedReplies[po.id] ? 'Hide' : 'Show'} {reps.length} {reps.length === 1 ? 'reply' : 'replies'}</button>}</div></div>
+            <div className="feed-actions"><button className="feed-action" onClick={() => { setReplyingTo(replyingTo === po.id ? null : po.id); setReplyText('') }}>↩ Reply</button>{reps.length > 0 && <button className="feed-action" style={{ marginLeft: 'auto' }} onClick={() => setExpandedReplies(p => ({ ...p, [po.id]: !p[po.id] }))}>{expandedReplies[po.id] ? 'Hide' : 'Show'} {reps.length} {reps.length === 1 ? 'reply' : 'replies'}</button>}{deleteControl('reply', po.id, po.member_id, reps.length > 0 ? {} : { marginLeft: 'auto' })}</div></div>}
 
             {replyingTo === po.id && currentUser && <div className="reply-compose"><div style={{ display: 'flex', gap: 12 }}><MemberAvatar member={currentUser} size={28} /><div style={{ flex: 1 }}><div className="reply-to-label">Replying to {m.first_name}</div><textarea className="reply-input" placeholder="Write your reply..." value={replyText} onChange={e => setReplyText(e.target.value)} autoFocus rows={2} /></div></div><div className="reply-actions"><button className="reply-cancel" onClick={() => setReplyingTo(null)}>Cancel</button><button className="reply-submit" style={{ opacity: replyText.trim() ? 1 : 0.4 }} onClick={() => submitReply(po.id)}>Reply</button></div></div>}
 
-            {(expandedReplies[po.id] || replyingTo === po.id) && reps.length > 0 && <div className="replies-list">{reps.map(r => { const rm = r.member || {}; return <div key={r.id} className="reply-card"><div className="reply-header"><MemberAvatar member={rm} size={24} /><span className="reply-name">{rm.first_name}</span><span className="reply-time">{timeAgo(r.created_at)}</span></div><div className="reply-body">{renderContent(r.content)}</div></div> })}</div>}
+            {(expandedReplies[po.id] || replyingTo === po.id) && reps.length > 0 && <div className="replies-list">{reps.map(r => { const rm = r.member || {}; return <div key={r.id} className="reply-card"><div className="reply-header"><MemberAvatar member={rm} size={24} /><span className="reply-name">{rm.first_name}</span><span className="reply-time">{timeAgo(r.created_at)}</span>{deleteControl('reply', r.id, r.member_id, { marginLeft: 'auto' })}</div><div className="reply-body">{renderContent(r.content)}</div></div> })}</div>}
           </div> }) : <div className="empty-state"><div className="empty-title">No posts yet</div><div className="empty-sub">Be the first to share your thoughts.</div></div>}
         </div>}
 
