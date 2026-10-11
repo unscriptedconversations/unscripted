@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
+import { normalizeTag } from '../lib/tags'
 
 // ── Interest prompt data ────────────────────────────────────────────────────
 const GOALS = [
@@ -64,6 +65,8 @@ export default function Signup() {
   const [selectedGoals, setSGoals] = useState([])
   const [selectedTopics, setSTopics] = useState([])
   const [done, setDone]            = useState(false)
+  const [readerInterestsDone, setRID] = useState(false) // reader flow: interests asked before club suggestions
+  const [clubsLoading, setCL] = useState(false)
 
   // OAuth completion mode (coming from /auth/callback with ?oauth=true)
   const isOAuth = router.query.oauth === 'true'
@@ -104,12 +107,31 @@ export default function Signup() {
   const btnO = { fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 10, padding: '13px 28px', cursor: 'pointer', width: '100%' }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+  // Ranked club suggestions for a new reader (suggested_clubs() in SQL):
+  // open, active, not hidden; ranked by fit with their chosen topics and how
+  // lively the club is. Each comes back with a one-line reason.
   async function loadClubs() {
-    const { data } = await supabase
-      .from('clubs')
-      .select('*, club_members(count), books(title, status)')
-    if (data) setClubs(data)
+    setCL(true)
+    try {
+      const topics = [...new Set(selectedTopics.map(normalizeTag).filter(Boolean))]
+      const { data: ranked } = await supabase.rpc('suggested_clubs', { p_topics: topics, p_limit: 5 })
+      const ids = (ranked || []).map(r => r.club_id)
+      if (!ids.length) { setClubs([]); return }
+      const { data } = await supabase.from('clubs').select('*, club_members(count), books(title, status)').in('id', ids)
+      const byId = new Map((data || []).map(c => [c.id, c]))
+      setClubs((ranked || []).filter(r => byId.has(r.club_id)).map(r => ({ ...byId.get(r.club_id), reason: r.reason })))
+    } catch { setClubs([]) } finally { setCL(false) }
   }
+
+  // Reader flow: account -> goals -> topics -> Find your rooms
+  function startReaderInterests() { setDone(true); setIS(1) }
+  async function goToRooms() {
+    await saveInterests(createdUser?.id)
+    setRID(true); setDone(false); setIS(0); setStep(2)
+    loadClubs()
+  }
+  // Interest screens' exits: readers continue to club suggestions; hosts finish
+  const afterInterests = () => (mode === 'individual' ? goToRooms() : finishAndRedirect(createdUser?.id))
 
   function searchBook(val) {
     setBkQ(val)
@@ -361,9 +383,9 @@ export default function Signup() {
           <div style={{ textAlign: 'center', marginTop: 16, paddingBottom: 48 }}>
             <span
               style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', cursor: 'pointer' }}
-              onClick={() => finishAndRedirect(createdUser?.id)}
+              onClick={afterInterests}
             >
-              Skip all — I'll set this up later
+              {mode === 'individual' ? 'Skip — show me clubs' : 'Skip all — I\u2019ll set this up later'}
             </span>
           </div>
         </div>
@@ -424,16 +446,16 @@ export default function Signup() {
 
           <button
             style={{ ...btn, opacity: selectedTopics.length >= 3 ? 1 : 0.7 }}
-            onClick={() => finishAndRedirect(createdUser?.id)}
+            onClick={afterInterests}
           >
-            {selectedTopics.length >= 3 ? 'Enter unscripted' : `Pick ${3 - selectedTopics.length} more to continue`}
+            {selectedTopics.length >= 3 ? (mode === 'individual' ? 'Find my clubs' : 'Enter unscripted') : `Pick ${3 - selectedTopics.length} more to continue`}
           </button>
           <div style={{ textAlign: 'center', marginTop: 16, paddingBottom: 48 }}>
             <span
               style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', cursor: 'pointer' }}
-              onClick={() => finishAndRedirect(createdUser?.id)}
+              onClick={afterInterests}
             >
-              Skip — I'll update this in my profile
+              {mode === 'individual' ? 'Skip — show me clubs' : 'Skip — I\u2019ll update this in my profile'}
             </span>
           </div>
         </div>
@@ -467,7 +489,10 @@ export default function Signup() {
               : `${clubData.name || 'Your club'} is live. Share the invite link and start reading together.`}
           </div>
 
-          {/* Interest prompt CTA */}
+          {/* Interest prompt CTA (readers already answered it before choosing clubs) */}
+          {readerInterestsDone ? (
+            <button style={btn} onClick={() => finishAndRedirect(createdUser?.id)}>Enter unscripted</button>
+          ) : <>
           <div style={{
             background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 16,
             padding: '24px 28px', marginBottom: 16, textAlign: 'left',
@@ -492,6 +517,7 @@ export default function Signup() {
           >
             Skip — I'll explore on my own
           </button>
+          </>}
         </div>
       </div>
     )
@@ -524,7 +550,7 @@ export default function Signup() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div
                 style={{ background: 'var(--sf)', border: '1.5px solid var(--bd)', borderRadius: 16, padding: '32px 28px', cursor: 'pointer' }}
-                onClick={() => { setMode('individual'); setStep(0); loadClubs() }}
+                onClick={() => { setMode('individual'); setStep(0) }}
               >
                 <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--tc)', marginBottom: 12 }}>Reader</div>
                 <div style={{ fontFamily: 'var(--hd)', fontSize: 24, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>Join as an individual</div>
@@ -601,9 +627,9 @@ export default function Signup() {
                   setError('')
                   if (!regData.first.trim() || !regData.last.trim() || !regData.email.trim()) { setError('All fields are required.'); return }
                   if (!isOAuth && regData.password.length < 8) { setError('Password must be at least 8 characters.'); return }
-                  if (createdUser) { setStep(2); return }
+                  if (createdUser) { startReaderInterests(); return }
                   const user = await createAccount()
-                  if (user) setStep(2)
+                  if (user) startReaderInterests()
                 }}>{loading ? 'Creating account…' : 'Continue'}</button>
               </div>
             )}
@@ -612,15 +638,26 @@ export default function Signup() {
             {step === 2 && (
               <div>
                 <div style={{ fontFamily: 'var(--hd)', fontSize: 28, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>Find your rooms.</div>
-                <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', marginBottom: 32 }}>Browse clubs and join the ones that call to you.</div>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', marginBottom: 32 }}>{selectedTopics.length ? 'Picked for what you love to read. Join any that call to you.' : 'A few lively clubs to start with. Join any that call to you.'}</div>
 
-                {clubs.map(c => {
+                {clubsLoading && <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', padding: '24px 0' }}>Finding clubs for you…</div>}
+
+                {!clubsLoading && clubs.length === 0 && (
+                  <div style={{ background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 14, padding: '24px', marginBottom: 12, textAlign: 'center' }}>
+                    <div style={{ fontFamily: 'var(--hd)', fontSize: 20, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>No open clubs to suggest yet.</div>
+                    <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.6, marginBottom: 16 }}>Be the first: start a club around a book you love and invite your people.</div>
+                    <button style={btnO} onClick={async () => { await saveInterests(createdUser?.id); router.push('/create') }}>Start your own club</button>
+                  </div>
+                )}
+
+                {!clubsLoading && clubs.map(c => {
                   const cb = (c.books || []).find(b => b.status === 'current')
                   return (
                     <div key={c.id} style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '20px 24px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 16 }}>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontFamily: 'var(--ui)', fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>{c.name}</div>
                         <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{cb ? cb.title + ' · ' : ''}{c.club_members?.[0]?.count || 0} members</div>
+                        {c.reason && <div style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, color: 'var(--tc)', marginTop: 4 }}>{c.reason}</div>}
                       </div>
                       <button
                         style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: joinedClubs[c.id] ? 'var(--sg)' : 'var(--ink)', background: joinedClubs[c.id] ? 'rgba(94,122,98,0.1)' : 'none', border: joinedClubs[c.id] ? 'none' : '1.5px solid var(--bd2)', borderRadius: 8, padding: '8px 18px', cursor: 'pointer', minWidth: 80 }}
@@ -636,7 +673,7 @@ export default function Signup() {
                 })}
 
                 <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
-                  <button style={btnO} onClick={() => setStep(0)}>Back</button>
+                  <button style={btnO} onClick={() => { setDone(true); setIS(2) }}>Back</button>
                   <button style={{ ...btn, flex: 1 }} onClick={() => setDone(true)}>Enter unscripted</button>
                 </div>
                 <div style={{ textAlign: 'center', marginTop: 16 }}>
