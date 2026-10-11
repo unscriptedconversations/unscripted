@@ -19,9 +19,10 @@ let cbSeq = 0
 // /search). Module-scoped like the timers, so it persists for the tab.
 let olSeq = 0
 
-// Homepage Spotlight carousel — three hand-curated slides, rotated every few
-// seconds. Swap these each cycle: [0] Book of the Month, [1] featured club,
-// [2] featured author. `to` drives each CTA:
+// Homepage Spotlight carousel. Each slot (book, club, author) comes from
+// spotlight() in SQL: your scheduled pick in spotlight_picks if one is active,
+// else the algorithm's weekly winner. These hand-written slides are only the
+// fallback for a slot spotlight() leaves empty. [0] book, [1] club, [2] author. `to` drives each CTA:
 //   { search: '...' } -> /search?q=...   { href: '/club/ID' } -> that path
 //   { create: true }  -> /create (or /signup if logged out)
 const SPOTLIGHT_SLIDES = [
@@ -36,8 +37,7 @@ const SPOTLIGHT_SLIDES = [
     ],
   },
   {
-    // Fallback shown only if there are no clubs yet; otherwise this slide is
-    // replaced at render by your `featured` club (or the most recent one).
+    // Fallback when no club qualifies for the spotlight yet.
     kicker: 'Club Spotlight',
     title: 'Start the first club',
     subtitle: 'Featured club',
@@ -66,12 +66,13 @@ export default function Landing() {
   const [spotPos, setSpotPos] = useState(0)        // 0..SPOT_N (SPOT_N = the copy)
   const [spotAnim, setSpotAnim] = useState(true)
   const [spotPaused, setSpotPaused] = useState(false)
+  const [spotRows, setSpotRows] = useState(null) // null until spotlight() answers; the card stays blank till then (no flicker)
   const spot = spotPos % SPOT_N
   useEffect(() => {
-    if (spotPaused) return
+    if (spotPaused || !spotRows) return
     const t = setTimeout(() => { setSpotAnim(true); setSpotPos(p => (p >= SPOT_N ? 1 : p + 1)) }, 3000) // p >= SPOT_N: snap was missed (e.g. reduced motion)
     return () => clearTimeout(t)
-  }, [spotPos, spotPaused])
+  }, [spotPos, spotPaused, spotRows])
   function setSpot(i) { setSpotAnim(true); setSpotPos(i) }
   function spotSettled(e) {
     if (e.target !== e.currentTarget) return // ignore transitions bubbling from buttons
@@ -144,7 +145,7 @@ export default function Landing() {
 
   async function loadData() {
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
-    const [cR, fR, pR, tR] = await Promise.all([
+    const [cR, fR, pR, tR, sR] = await Promise.all([
       // Capped: the page shows a handful of clubs, so load the newest 60 plus any
       // featured ones (fetched separately so an older featured club still shows).
       // Search hits clubs/books server-side instead of filtering a full load.
@@ -153,8 +154,10 @@ export default function Landing() {
       supabase.from('posts').select('club_id, member_id, created_at').gte('created_at', since),
       // Ranked + slot-limited server-side (see trending_searches() in SQL)
       supabase.rpc('trending_searches'),
+      supabase.rpc('spotlight'),
     ])
     setTrending((tR.data || []).map(r => r.term).filter(Boolean))
+    setSpotRows(sR.data || [])
     if (cR.data || fR.data) {
       const byId = new Map()
       for (const c of [...(fR.data || []), ...(cR.data || [])]) byId.set(c.id, c)
@@ -297,18 +300,23 @@ export default function Landing() {
   const featuredClubs = clubs.filter(c => c.featured)
   // Club Spotlight slide: your `featured` club (manual control via the flag),
   // else the most recent club. Falls back to the static slide if none exist.
-  const spotlightClub = clubs.find(c => c.featured) || clubs[0]
-  const spotlightSlides = SPOTLIGHT_SLIDES.map((sl, i) => (
-    i === 1 && spotlightClub
-      ? {
-          kicker: 'Club Spotlight',
-          title: spotlightClub.name,
-          subtitle: 'Featured club',
-          blurb: spotlightClub.description || 'A reading group worth joining this month.',
-          ctas: [{ label: 'View club', primary: true, to: { href: `/club/${spotlightClub.id}` } }],
-        }
-      : sl
-  ))
+  // Build each slot from spotlight() rows, falling back per slot to the defaults
+  const spotBySlot = Object.fromEntries((spotRows || []).map(r => [r.slot, r]))
+  const spotlightSlides = ['book', 'club', 'author'].map((slot, i) => {
+    const r = spotBySlot[slot]
+    if (!r) return SPOTLIGHT_SLIDES[i]
+    const base = { kicker: r.kicker, title: r.title, subtitle: r.subtitle || '', blurb: r.blurb || '' }
+    if (slot === 'book') return { ...base, ctas: [
+      { label: 'Find a club reading this', primary: true, to: { search: r.search_term || r.title } },
+      { label: 'Start your own', primary: false, to: { create: true } },
+    ] }
+    if (slot === 'club') return { ...base, ctas: [
+      r.club_id
+        ? { label: 'View club', primary: true, to: { href: `/club/${r.club_id}` } }
+        : { label: 'Find this club', primary: true, to: { search: r.title } },
+    ] }
+    return { ...base, ctas: [{ label: 'Explore their books', primary: true, to: { search: r.search_term || r.title } }] }
+  })
   // Fallback: if no featured clubs, show top 3 by member count
   const featuredDisplay = featuredClubs.length > 0
     ? featuredClubs.slice(0, 3)
@@ -461,7 +469,7 @@ export default function Landing() {
           <div onMouseEnter={() => setSpotPaused(true)} onMouseLeave={() => setSpotPaused(false)} style={{ background: 'var(--ink)', borderRadius: 20, position: 'relative', overflow: 'hidden', minHeight: 264 }}>
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: 'linear-gradient(90deg, var(--tc), var(--sg))' }} />
             <div className="spot-track" onTransitionEnd={spotSettled} style={{ display: 'flex', transform: `translateX(-${spotPos * 100}%)`, transition: spotAnim ? 'transform 650ms cubic-bezier(.65, 0, .35, 1)' : 'none' }}>
-              {[...spotlightSlides, spotlightSlides[0]].map((sl, si) => (
+              {spotRows && [...spotlightSlides, spotlightSlides[0]].map((sl, si) => (
                 <div key={si} aria-hidden={si !== spotPos}
                   style={{ flex: '0 0 100%', minWidth: 0, boxSizing: 'border-box', padding: '40px 48px 46px',
                     // Off-screen slides hide (after sliding out) so their buttons can't take keyboard focus
@@ -479,7 +487,7 @@ export default function Landing() {
               ))}
             </div>
             <div style={{ position: 'absolute', bottom: 18, right: 24, display: 'flex', gap: 8 }}>
-              {spotlightSlides.map((_, i) => (
+              {spotRows && spotlightSlides.map((_, i) => (
                 <button key={i} onClick={() => setSpot(i)} aria-label={`Go to slide ${i + 1}`} style={{ width: 8, height: 8, borderRadius: '50%', padding: 0, border: 'none', cursor: 'pointer', background: i === spot ? 'var(--tc)' : 'rgba(242,235,224,0.25)', transition: 'background 0.2s' }} />
               ))}
             </div>
