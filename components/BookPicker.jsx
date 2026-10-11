@@ -56,9 +56,10 @@ export default function BookPicker({ title = '', author = '', onChange, placehol
   const showList = open && (loading || results.length > 0 || title.trim().length >= 2)
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div style={{ position: 'relative', marginBottom: 24 }}>
       <input
         className="field-input"
+        style={{ marginBottom: 0 }} // spacing lives on the wrapper, so the author line sits right under the input
         value={title}
         onChange={e => type(e.target.value)}
         onKeyDown={onKey}
@@ -72,7 +73,7 @@ export default function BookPicker({ title = '', author = '', onChange, placehol
       />
 
       {author && !open && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>
           <span>by <strong style={{ color: 'var(--ink)', fontWeight: 600 }}>{author}</strong></span>
           <button type="button" onClick={() => onChange?.({ title, author: '' })} aria-label="Clear author"
             style={{ background: 'none', border: 'none', color: 'var(--txD)', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
