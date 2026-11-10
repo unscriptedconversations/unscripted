@@ -107,19 +107,36 @@ export default function Landing() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    loadData()
+    // Fast nav: decide from this browser's saved login before any network call.
+    // No saved Supabase session -> logged out, show Log in / Join right away.
+    // Saved session + cached member for the same user -> show them right away.
+    // The real check below then confirms or corrects it.
+    try {
+      const key = Object.keys(window.localStorage).find(k => /^sb-.*-auth-token$/.test(k))
+      const uid = key ? JSON.parse(window.localStorage.getItem(key) || 'null')?.user?.id : null
+      if (!uid) setAuthReady(true)
+      else {
+        const cached = JSON.parse(window.localStorage.getItem('unscripted_user') || 'null')
+        if (cached?.id === uid) { setCurrentUser(cached); setAuthReady(true) }
+      }
+    } catch (e) {}
 
-    // Load session from Supabase Auth (replaces localStorage)
+    // Confirm with Supabase Auth (and refresh the cached member)
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       try {
-        if (!session) return
+        if (!session) { setCurrentUser(null); return }
         const { data: member } = await supabase
           .from('members').select('*').eq('id', session.user.id).single()
-        if (member) setCurrentUser(member)
+        if (member) {
+          setCurrentUser(member)
+          try { window.localStorage.setItem('unscripted_user', JSON.stringify(member)) } catch (e) {}
+        }
       } finally {
         setAuthReady(true)
       }
     })
+
+    loadData() // page content after the auth check, so the nav isn't queued behind it
 
     // Keep in sync on login/logout/OAuth
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -129,6 +146,7 @@ export default function Landing() {
         if (member) setCurrentUser(member)
       } else {
         setCurrentUser(null)
+        try { window.localStorage.removeItem('unscripted_user') } catch (e) {}
       }
     })
     return () => subscription.unsubscribe()
