@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
@@ -12,6 +12,22 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [ssoLoading, setSSOLoading] = useState(null) // 'google' | 'apple'
   const [error, setError] = useState('')
+  const [unconfirmed, setUnconfirmed] = useState(false) // signed up but hasn't clicked the email link
+  const [resendState, setResendState] = useState('idle') // idle | sending | sent | error
+
+  // Prefill from /login?email=... (e.g. sent here from signup)
+  useEffect(() => {
+    if (router.isReady && typeof router.query.email === 'string') setEmail(router.query.email)
+  }, [router.isReady, router.query.email])
+
+  async function resendConfirmation() {
+    setResendState('sending')
+    const { error: err } = await supabase.auth.resend({
+      type: 'signup', email: email.trim().toLowerCase(),
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+    })
+    setResendState(err ? 'error' : 'sent')
+  }
 
   // ── Styles (matching existing codebase patterns) ────────────────────────
   const fl = {
@@ -42,7 +58,7 @@ export default function Login() {
   // ── Handlers ─────────────────────────────────────────────────────────────
   async function handleLogin(e) {
     e.preventDefault()
-    setError('')
+    setError(''); setUnconfirmed(false); setResendState('idle')
     if (!email.trim() || !password) { setError('Please enter your email and password.'); return }
     setLoading(true)
     const { data, error: err } = await supabase.auth.signInWithPassword({
@@ -51,7 +67,10 @@ export default function Login() {
     })
     setLoading(false)
     if (err) {
-      if (err.message.toLowerCase().includes('invalid')) {
+      if (err.code === 'email_not_confirmed' || err.message.toLowerCase().includes('not confirmed')) {
+        setUnconfirmed(true)
+        setError('Please confirm your email first. Tap the link we sent when you signed up.')
+      } else if (err.message.toLowerCase().includes('invalid')) {
         setError('Incorrect email or password.')
       } else if (err.message.toLowerCase().includes('rate')) {
         setError('Too many attempts. Please try again in a few minutes.')
@@ -66,12 +85,16 @@ export default function Login() {
         .from('members')
         .select('*')
         .eq('id', data.session.user.id)
-        .single()
-if (member) {
+        .maybeSingle()
+      if (member) {
         // Disabled accounts reactivate on login
         if (member.status === 'disabled') {
           await supabase.from('members').update({ status: 'active', disabled_at: null }).eq('id', member.id)
         }
+
+        // Email signup that never finished onboarding: continue where they left off
+        const md = data.session.user.user_metadata || {}
+        if (md.signup_mode && !md.onboarded) { router.push('/signup?resume=1'); return }
 
         // Find first club membership
         const { data: membership } = await supabase
@@ -80,11 +103,11 @@ if (member) {
           .eq('member_id', member.id)
           .order('joined_at', { ascending: true })
           .limit(1)
-          .single()
+          .maybeSingle()
         router.push(redirect || (membership?.club_id ? `/club/${membership.club_id}` : '/'))
       } else {
         // Auth user exists but no member profile — finish setup
-        router.push('/signup?complete=true')
+        router.push('/signup?oauth=true')
       }
     }
   }
@@ -137,6 +160,16 @@ if (member) {
             borderRadius: 10, padding: '12px 16px', marginBottom: 24, lineHeight: 1.5,
           }}>
             {error}
+            {unconfirmed && (
+              <div style={{ marginTop: 10 }}>
+                <button type="button" onClick={resendConfirmation} disabled={resendState === 'sending'}
+                  style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '8px 14px', cursor: 'pointer' }}>
+                  {resendState === 'sending' ? 'Sending\u2026' : 'Resend confirmation email'}
+                </button>
+                {resendState === 'sent' && <span style={{ marginLeft: 10, color: 'var(--sg)' }}>Sent. Check your inbox.</span>}
+                {resendState === 'error' && <span style={{ marginLeft: 10 }}>Couldn{'\u2019'}t send. Try again in a minute.</span>}
+              </div>
+            )}
           </div>
         )}
 
