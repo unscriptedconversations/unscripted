@@ -64,11 +64,25 @@ export default function SearchPage() {
   const [currentUser, setCurrentUser] = useState(null)
   const [authReady, setAuthReady] = useState(false)
   useEffect(() => {
+    // Fast nav (same as the homepage): decide from this browser's saved login
+    // first, then confirm with Supabase and refresh the cached member.
+    try {
+      const key = Object.keys(window.localStorage).find(k => /^sb-.*-auth-token$/.test(k))
+      const uid = key ? JSON.parse(window.localStorage.getItem(key) || 'null')?.user?.id : null
+      if (!uid) setAuthReady(true)
+      else {
+        const cached = JSON.parse(window.localStorage.getItem('unscripted_user') || 'null')
+        if (cached?.id === uid) { setCurrentUser(cached); setAuthReady(true) }
+      }
+    } catch (e) {}
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       try {
-        if (!session) return
+        if (!session) { setCurrentUser(null); return }
         const { data: m } = await supabase.from('members').select('*').eq('id', session.user.id).single()
-        if (m) setCurrentUser(m)
+        if (m) {
+          setCurrentUser(m)
+          try { window.localStorage.setItem('unscripted_user', JSON.stringify(m)) } catch (e) {}
+        }
       } finally { setAuthReady(true) }
     })
   }, [])
@@ -213,7 +227,7 @@ export default function SearchPage() {
                 <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
                   <span className="user-nav-name">{currentUser.first_name}</span>
                 </div>
-                <SettingsMenu currentUser={currentUser} onLogout={() => setCurrentUser(null)} />
+                <SettingsMenu currentUser={currentUser} onLogout={() => { setCurrentUser(null); try { window.localStorage.removeItem('unscripted_user') } catch (e) {} }} />
               </div>
             ) : (
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
