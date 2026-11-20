@@ -570,9 +570,14 @@ export default function Landing() {
         {/* FOOTER */}
         <footer style={{ borderTop: '1px solid var(--bd)', padding: '32px 0 48px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ fontFamily: 'var(--cs)', fontSize: 20, color: 'var(--ink)' }}>unscripted</div>
-          <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>A bridger of community. Have an opinion.</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>A bridger of community. Have an opinion.</div>
+            <a href="/terms" style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, color: 'var(--txD)' }}>Terms</a>
+            <a href="/privacy" style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, color: 'var(--txD)' }}>Privacy</a>
+          </div>
         </footer>
       </div>
     </div>
   )
 }
+                      
