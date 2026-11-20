@@ -751,6 +751,9 @@ export default function Signup() {
                   const user = await createAccount()
                   if (user) startReaderInterests()
                 }}>{loading ? 'Creating account…' : 'Continue'}</button>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', textAlign: 'center', lineHeight: 1.6, marginTop: 14 }}>
+                  By continuing, you agree to our <a href="/terms" target="_blank" rel="noopener" style={{ color: 'var(--tc)' }}>Terms</a> and <a href="/privacy" target="_blank" rel="noopener" style={{ color: 'var(--tc)' }}>Privacy Policy</a>, and confirm you{'\u2019'}re 18 or older.
+                </div>
               </div>
             )}
 
@@ -851,6 +854,9 @@ export default function Signup() {
                   const user = await createAccount()
                   if (user) setStep(2)
                 }}>{loading ? 'Creating account…' : 'Continue'}</button>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', textAlign: 'center', lineHeight: 1.6, marginTop: 14 }}>
+                  By continuing, you agree to our <a href="/terms" target="_blank" rel="noopener" style={{ color: 'var(--tc)' }}>Terms</a> and <a href="/privacy" target="_blank" rel="noopener" style={{ color: 'var(--tc)' }}>Privacy Policy</a>, and confirm you{'\u2019'}re 18 or older.
+                </div>
               </div>
             )}
 
