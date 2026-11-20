@@ -45,6 +45,10 @@ export default function Signup() {
   const [loading, setLoading]   = useState(false)
   const [createdUser, setCU]    = useState(null)
   const [showPw, setShowPw]     = useState(false)
+  // "Confirm email" ON: after signUp there's no session until the email link is
+  // clicked. awaitingEmail holds the address while we show "Check your inbox".
+  const [awaitingEmail, setAwaitingEmail] = useState('')
+  const [resendState, setResendState] = useState('idle') // idle | sending | sent | error
 
   const [regData, setRD] = useState({
     first: '', last: '', email: '', password: '',
@@ -88,6 +92,28 @@ export default function Signup() {
       setStep(0)
     })
   }, [isOAuth])
+
+  // Back from the confirmation email (/auth/callback -> /signup?resume=1):
+  // pick up onboarding where they left off. Readers -> interests -> clubs;
+  // hosts -> name your club (with any book they started from).
+  useEffect(() => {
+    if (!router.isReady || router.query.resume !== '1') return
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) { router.replace('/login'); return }
+      const { data: m } = await supabase.from('members').select('*').eq('id', session.user.id).maybeSingle()
+      if (!m) { router.replace('/signup?oauth=true'); return } // no profile yet: finish it
+      const md = session.user.user_metadata || {}
+      setCU(m)
+      setRD(d => ({ ...d, first: m.first_name || '', last: m.last_name || '', email: m.email || session.user.email || '' }))
+      if (md.signup_mode === 'club') {
+        if (md.book_title) setCD(d => ({ ...d, bookTitle: md.book_title, bookAuthor: md.book_author || '' }))
+        setMode('club'); setStep(2)
+      } else {
+        setMode('individual'); startReaderInterests()
+      }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.resume])
 
   // Arriving from a book page ("Start a club for this book") — carry the book through
   useEffect(() => {
@@ -199,6 +225,12 @@ export default function Signup() {
 
     let authUserId
 
+    const initials = ((regData.first?.[0] || '') + (regData.last?.[0] || '')).toUpperCase()
+    const palette = ['#C27A5A', '#5E7A62', '#A0603E', '#7A9A7E', '#B0855A', '#6E8B6E', '#B0A594']
+    let ch = 0; const seed = regData.email.trim().toLowerCase()
+    for (let i = 0; i < seed.length; i++) ch = (ch * 31 + seed.charCodeAt(i)) >>> 0
+    const color = palette[ch % palette.length]
+
     if (isOAuth) {
       // OAuth user — session already exists, just get their ID
       const { data: { session } } = await supabase.auth.getSession()
@@ -206,9 +238,23 @@ export default function Signup() {
       authUserId = session.user.id
     } else {
       // Email + password — create Supabase Auth user first
+      // Name + onboarding context ride along in metadata: the database creates
+      // the member profile from it (new_user_profile.sql), and /signup?resume=1
+      // uses it to continue onboarding after the confirmation email.
       const { data: authData, error: authErr } = await supabase.auth.signUp({
         email: regData.email.trim().toLowerCase(),
         password: regData.password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          data: {
+            first_name: regData.first.trim(),
+            last_name: regData.last.trim(),
+            initials,
+            color,
+            signup_mode: mode || 'individual',
+            ...(mode === 'club' && clubData.bookTitle ? { book_title: clubData.bookTitle, book_author: clubData.bookAuthor || '' } : {}),
+          },
+        },
       })
 
       if (authErr) {
@@ -223,16 +269,31 @@ export default function Signup() {
         return null
       }
 
+      // With "Confirm email" on, Supabase hides whether an address is taken:
+      // an existing address comes back with no identities.
+      if (authData.user && Array.isArray(authData.user.identities) && authData.user.identities.length === 0) {
+        setLoading(false)
+        setError('An account with this email already exists.')
+        setTimeout(() => router.push(`/login?email=${encodeURIComponent(regData.email.trim())}`), 1800)
+        return null
+      }
+
+      // No session = they must confirm their email first. The profile already
+      // exists (database trigger); show "Check your inbox".
+      if (!authData.session) {
+        setLoading(false)
+        setAwaitingEmail(regData.email.trim().toLowerCase())
+        return null
+      }
+
       authUserId = authData.user.id
+
+      // Confirmation off: the trigger may already have made the profile.
+      const { data: existing } = await supabase.from('members').select('*').eq('id', authUserId).maybeSingle()
+      if (existing) { setLoading(false); setCU(existing); return existing }
     }
 
     // Insert member row — using auth user ID as primary key
-    const initials = ((regData.first?.[0] || '') + (regData.last?.[0] || '')).toUpperCase()
-    const palette = ['#C27A5A', '#5E7A62', '#A0603E', '#7A9A7E', '#B0855A', '#6E8B6E', '#B0A594']
-    let ch = 0; const seed = regData.email.trim().toLowerCase()
-    for (let i = 0; i < seed.length; i++) ch = (ch * 31 + seed.charCodeAt(i)) >>> 0
-    const color = palette[ch % palette.length]
-
     const { data: member, error: memberErr } = await supabase
       .from('members')
       .insert({
@@ -330,8 +391,15 @@ export default function Signup() {
   }
 
   // Final redirect after interest prompt
+  // Tells /auth/callback this account has finished onboarding (so a later
+  // email link doesn't send them back into signup).
+  async function markOnboarded() {
+    try { await supabase.auth.updateUser({ data: { onboarded: true } }) } catch (e) {}
+  }
+
   async function finishAndRedirect(userId) {
     await saveInterests(userId)
+    await markOnboarded()
         const { data: membership } = await supabase
       .from('club_members')
       .select('club_id, role')
@@ -348,6 +416,41 @@ export default function Signup() {
       : `/club/${membership.club_id}`)
   }
 
+
+  // ── "Check your inbox" (Confirm email ON) ──────────────────────────────────
+  async function resendConfirmation() {
+    setResendState('sending')
+    const { error: err } = await supabase.auth.resend({
+      type: 'signup', email: awaitingEmail,
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+    })
+    setResendState(err ? 'error' : 'sent')
+  }
+  if (awaitingEmail) {
+    return (
+      <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 24px' }}>
+        <div style={{ maxWidth: 440, width: '100%', textAlign: 'center' }}>
+          <div style={{ fontSize: 40, marginBottom: 16 }} aria-hidden="true">{'\u2709\uFE0F'}</div>
+          <div style={{ fontFamily: 'var(--hd)', fontSize: 30, fontWeight: 600, color: 'var(--ink)', marginBottom: 12 }}>Check your inbox.</div>
+          <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', lineHeight: 1.7, marginBottom: 28 }}>
+            We sent a link to <strong style={{ color: 'var(--ink)' }}>{awaitingEmail}</strong>. Tap it to confirm your email, and you{'\u2019'}ll pick up right where you left off.
+            <br />It can take a minute. Check spam if you don{'\u2019'}t see it.
+          </div>
+          <button style={{ ...btnO, width: '100%', opacity: resendState === 'sending' ? 0.5 : 1 }} disabled={resendState === 'sending'} onClick={resendConfirmation}>
+            {resendState === 'sending' ? 'Sending\u2026' : 'Resend email'}
+          </button>
+          {resendState === 'sent' && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--sg)', marginTop: 10 }}>Sent again.</div>}
+          {resendState === 'error' && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: '#A0603E', marginTop: 10 }}>Couldn{'\u2019'}t resend just now. Wait a minute and try again.</div>}
+          <div style={{ marginTop: 20 }}>
+            <button style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--txD)', background: 'none', border: 'none', cursor: 'pointer' }}
+              onClick={() => { setAwaitingEmail(''); setResendState('idle'); setRD(d => ({ ...d, password: '' })) }}>
+              Wrong email? Go back
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   // ── Interest prompt — Goals step ─────────────────────────────────────────
   if (done && interestStep === 1) {
@@ -663,7 +766,7 @@ export default function Signup() {
                   <div style={{ background: 'var(--sf)', border: '1px dashed var(--bd2)', borderRadius: 14, padding: '24px', marginBottom: 12, textAlign: 'center' }}>
                     <div style={{ fontFamily: 'var(--hd)', fontSize: 20, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>No open clubs to suggest yet.</div>
                     <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.6, marginBottom: 16 }}>Be the first: start a club around a book you love and invite your people.</div>
-                    <button style={btnO} onClick={async () => { await saveInterests(createdUser?.id); router.push('/create') }}>Start your own club</button>
+                    <button style={btnO} onClick={async () => { await saveInterests(createdUser?.id); await markOnboarded(); router.push('/create') }}>Start your own club</button>
                   </div>
                 )}
 
