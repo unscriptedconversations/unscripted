@@ -45,6 +45,7 @@ export default function ProfilePage() {
   const router = useRouter()
   const { id } = router.query
   const [member, setMember] = useState(null)
+  const [emailPrefSaving, setEmailPrefSaving] = useState(false)
   const [writings, setWritings] = useState([])
   const [clubs, setClubs] = useState([])
   const [shelfItems, setShelfItems] = useState([])
@@ -332,6 +333,34 @@ export default function ProfilePage() {
           <div style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '20px 22px', marginBottom: 12 }}>
             <div style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, color: 'var(--ink)', marginBottom: 4 }}>Email</div>
             <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>{member.email}</div>
+          </div>
+
+          {/* Club emails: hosts can email their club (pages/api/club-email.js); this opts out */}
+          <div style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '20px 22px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, color: 'var(--ink)', marginBottom: 4 }}>Club emails</div>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', lineHeight: 1.5 }}>
+                {member.club_email_opt_out
+                  ? 'Off. You won\u2019t get emails from your clubs\u2019 hosts. Announcements still appear in each club\u2019s feed.'
+                  : 'On. Your clubs\u2019 hosts can email you announcements, at most once a day per club.'}
+              </div>
+            </div>
+            <button
+              role="switch"
+              aria-checked={!member.club_email_opt_out}
+              aria-label="Club emails"
+              disabled={emailPrefSaving}
+              onClick={async () => {
+                const next = !member.club_email_opt_out
+                setEmailPrefSaving(true)
+                const { error } = await supabase.from('members').update({ club_email_opt_out: next }).eq('id', member.id)
+                setEmailPrefSaving(false)
+                if (error) { window.alert('Couldn\u2019t save that. Please try again.'); return }
+                setMember(m => ({ ...m, club_email_opt_out: next }))
+              }}
+              style={{ width: 46, height: 26, borderRadius: 13, border: 'none', padding: 3, cursor: 'pointer', flexShrink: 0, background: member.club_email_opt_out ? 'var(--bd2)' : 'var(--tc)', opacity: emailPrefSaving ? 0.6 : 1, transition: 'background 0.2s' }}>
+              <span style={{ display: 'block', width: 20, height: 20, borderRadius: '50%', background: '#FFF', transform: member.club_email_opt_out ? 'translateX(0)' : 'translateX(20px)', transition: 'transform 0.2s' }} />
+            </button>
           </div>
 
           <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: '#A0603E', margin: '28px 0 14px', paddingBottom: 10, borderBottom: '1px solid rgba(160,96,62,0.2)' }}>Danger Zone</div>
