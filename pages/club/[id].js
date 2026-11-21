@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
-import Logo from '../../components/Logo'
 import Tag from '../../components/Tag'
-import NotificationBell from '../../components/NotificationBell'
+import TopNav from '../../components/TopNav'
 import ClubChat from '../../components/ClubChat'
 import { notifyMentions, createNotification, notifyClubPost } from '../../lib/notify'
 import ManualBookAdd from '../../components/ManualBookAdd'
@@ -760,30 +759,9 @@ export default function ClubPage() {
 
       <div className="shell">
         {/* NAV */}
-        <nav className="topnav">
-          <div className="brand" onClick={() => router.push('/')}><Logo /></div>
-          <div className="nav-links">
-            <button className="nav-btn" onClick={() => router.push('/')}>Explore</button>
-            <button className="nav-btn active">{club.name}</button>
-            {currentUser ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <NotificationBell currentUser={currentUser} />
-                <div className="user-nav" onClick={() => openProfile(currentUser)}>
-                  <MemberAvatar member={currentUser} size={32} />
-                  <span className="user-nav-name">{currentUser.first_name}</span>
-                </div>
-                <button
-                  onClick={async () => { try { await supabase.auth.signOut({ scope: 'local' }) } catch (e) {} setCurrentUser(null); router.push('/') }}
-                  style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, letterSpacing: 1, color: 'var(--txD)', background: 'none', border: 'none', cursor: 'pointer', textTransform: 'uppercase' }}
-                >
-                  Log out
-                </button>
-              </div>
-            ) : (
-              <button className="join-btn" onClick={() => router.push('/login')}>Log in</button>
-            )}
-          </div>
-        </nav>
+        <TopNav>
+          <button className="nav-btn active">{club.name}</button>
+        </TopNav>
 
         {/* CLUB HEADER */}
         <div style={{ padding: '40px 0 0' }}>
