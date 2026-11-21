@@ -52,7 +52,7 @@ function explainAuthError(err) {
     text = 'Please choose a stronger password: at least 8 characters, mixing letters and numbers.'
   } else if (err?.code === 'signup_disabled' || err?.code === 'email_provider_disabled') {
     text = 'New signups are paused right now. Please try again later.'
-  } else if (err?.name === 'AuthRetryableFetchError' || status === 0 && empty) {
+  } else if (status === 0 && (err?.name === 'AuthRetryableFetchError' || empty)) { // truly unreachable (no response)
     text = 'We couldn\u2019t reach our server. Check your connection and try again.'
   } else if (empty || status >= 500 || low.includes('sending confirmation') || low.includes('database error')) {
     text = `We couldn\u2019t finish creating your account. This usually means the confirmation email couldn\u2019t be sent. Please try again in a few minutes. If it keeps happening, email ${SUPPORT_EMAIL} with the code below.`
