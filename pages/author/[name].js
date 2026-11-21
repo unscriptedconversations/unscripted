@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
-import Logo from '../../components/Logo'
+import TopNav from '../../components/TopNav'
 
 export default function AuthorPage() {
   const router = useRouter()
@@ -99,13 +99,7 @@ export default function AuthorPage() {
     <div style={{ minHeight: '100vh' }}>
       <title>{name} — unscripted</title>
       <div className="shell">
-        <nav className="topnav">
-          <div className="brand" onClick={() => router.push('/')}><Logo /></div>
-          <div className="nav-links">
-            <button className="nav-btn" onClick={() => router.push('/')}>Explore</button>
-            <button className="join-btn" onClick={() => router.push('/signup')}>Join</button>
-          </div>
-        </nav>
+        <TopNav />
 
         <div style={{ paddingBottom: 80 }}>
           <button className="profile-back" onClick={() => router.back()}>← Back</button>
