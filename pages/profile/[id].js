@@ -26,6 +26,48 @@ function timeAgo(date) {
 
 const FORMAT_LABEL = { essay: 'Essay', reflection: 'Reflection', note: 'Note' }
 
+// In-app notification switches. Keys match notifications.type; the
+// notification_prefs.sql trigger skips any type a member turns off.
+const NOTIF_TYPES = [
+  ['reply', 'Replies', 'When someone replies to you in a club discussion'],
+  ['mention', 'Mentions', 'When someone @mentions you'],
+  ['follow', 'New followers', 'When someone follows your writing'],
+  ['club_post', 'Club posts', 'New posts in your clubs, bundled every few hours'],
+]
+
+function Switch({ on, onToggle, label, disabled }) {
+  return (
+    <button role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={onToggle}
+      style={{ width: 46, height: 26, borderRadius: 13, border: 'none', padding: 3, cursor: disabled ? 'default' : 'pointer', flexShrink: 0, background: on ? 'var(--tc)' : 'var(--bd2)', opacity: disabled ? 0.6 : 1, transition: 'background 0.2s' }}>
+      <span style={{ display: 'block', width: 20, height: 20, borderRadius: '50%', background: '#FFF', transform: on ? 'translateX(20px)' : 'translateX(0)', transition: 'transform 0.2s' }} />
+    </button>
+  )
+}
+
+// Plain-language versions of Supabase auth errors for the Account tab.
+function accountAuthError(err) {
+  const code = err?.code || ''
+  const low = (err?.message || '').toLowerCase()
+  if (code === 'email_exists' || low.includes('already been registered')) return 'That email is already used by another account.'
+  if (code === 'email_address_invalid' || low.includes('invalid format')) return 'That doesn’t look like a valid email address.'
+  if (code === 'over_email_send_rate_limit' || code === 'over_request_rate_limit' || low.includes('rate limit')) return 'Too many tries in a short time. Please wait a few minutes and try again.'
+  if (code === 'same_password') return 'Your new password needs to be different from your current one.'
+  if (code === 'weak_password') return 'That password is too easy to guess. Try a longer one.'
+  if (code === 'reauthentication_needed' || code === 'reauthentication_not_valid') return 'For your security, log out and log back in, then try again.'
+  return 'Something went wrong. Please try again.' + (code ? ` (Error code: ${code})` : '')
+}
+
+const fieldStyle = { width: '100%', padding: '12px 14px', background: 'var(--bg)', border: '1px solid var(--bd2)', borderRadius: 10, fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--ink)', outline: 'none', boxSizing: 'border-box', marginBottom: 10 }
+const cardStyle = { background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '20px 22px', marginBottom: 12 }
+const cardTitle = { fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, color: 'var(--ink)', marginBottom: 4 }
+const cardHint = { fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', lineHeight: 1.5 }
+const saveBtn = { fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 8, padding: '10px 18px', cursor: 'pointer' }
+const sectionLabel = { fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--txD)', margin: '24px 0 12px' }
+function Msg({ m }) {
+  if (!m) return null
+  return <div role="status" style={{ fontFamily: 'var(--ui)', fontSize: 12, lineHeight: 1.5, marginTop: 10, color: m.ok ? '#5E7A62' : '#A0603E' }}>{m.text}</div>
+}
+
 function WritingCard({ w, onClick }) {
   const preview = w.content.length > 160 ? w.content.slice(0, 160) + '...' : w.content
   return (
@@ -46,6 +88,15 @@ export default function ProfilePage() {
   const { id } = router.query
   const [member, setMember] = useState(null)
   const [emailPrefSaving, setEmailPrefSaving] = useState(false)
+  // Account tab
+  const [authUser, setAuthUser] = useState(null)          // session.user: email, new_email, providers
+  const [nameForm, setNameForm] = useState(null)          // { first, last } once editing starts
+  const [nameMsg, setNameMsg] = useState(null)            // { ok, text }
+  const [newEmail, setNewEmail] = useState('')
+  const [emailMsg, setEmailMsg] = useState(null)
+  const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' })
+  const [pwMsg, setPwMsg] = useState(null)
+  const [acctBusy, setAcctBusy] = useState('')            // 'name' | 'email' | 'password' | notif key
   const [writings, setWritings] = useState([])
   const [clubs, setClubs] = useState([])
   const [shelfItems, setShelfItems] = useState([])
@@ -79,9 +130,13 @@ export default function ProfilePage() {
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) return
+      setAuthUser(session.user)
       const { data: m } = await supabase.from('members').select('*').eq('id', session.user.id).single()
       if (m) setCurrentUser(m)
     })
+    // Keep email / password state fresh after updateUser or a confirmed email change
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => { if (session?.user) setAuthUser(session.user) })
+    return () => sub?.subscription?.unsubscribe()
   }, [])
 
   useEffect(() => { if (id) load() }, [id])
@@ -209,6 +264,74 @@ export default function ProfilePage() {
     router.push('/')
   }
 
+  // ── Account tab actions ──
+  // Signed up with email, or set a password later (we mark user_metadata.has_password).
+  const hasPassword = !!(authUser && ((authUser.app_metadata?.providers || []).includes('email') || authUser.identities?.some(i => i.provider === 'email') || authUser.user_metadata?.has_password))
+
+  async function saveName() {
+    const first = (nameForm?.first || '').trim().replace(/\s+/g, ' ')
+    const last = (nameForm?.last || '').trim().replace(/\s+/g, ' ')
+    if (!first || !last) { setNameMsg({ ok: false, text: 'Please fill in both your first and last name.' }); return }
+    if (first.length > 50 || last.length > 50) { setNameMsg({ ok: false, text: 'Names can be up to 50 characters each.' }); return }
+    setAcctBusy('name'); setNameMsg(null)
+    const initials = (first[0] + last[0]).toUpperCase()
+    const { data, error } = await supabase.from('members').update({ first_name: first, last_name: last, initials }).eq('id', member.id).select().single()
+    setAcctBusy('')
+    if (error || !data) { setNameMsg({ ok: false, text: 'Couldn’t save your name. Please try again.' }); return }
+    setMember(data); setCurrentUser(data); setNameForm(null)
+    try { window.localStorage.setItem('unscripted_user', JSON.stringify(data)) } catch (e) {}
+    supabase.auth.updateUser({ data: { first_name: first, last_name: last, initials } }).catch(() => {})
+    setNameMsg({ ok: true, text: 'Name updated.' })
+  }
+
+  async function changeEmail() {
+    const next = newEmail.trim().toLowerCase()
+    const current = (authUser?.email || '').toLowerCase()
+    if (!/^\S+@\S+\.\S+$/.test(next)) { setEmailMsg({ ok: false, text: 'That doesn’t look like a valid email address.' }); return }
+    if (next === current) { setEmailMsg({ ok: false, text: 'That’s already your email.' }); return }
+    setAcctBusy('email'); setEmailMsg(null)
+    const { data, error } = await supabase.auth.updateUser({ email: next }, { emailRedirectTo: `${window.location.origin}/auth/callback` })
+    setAcctBusy('')
+    if (error) { setEmailMsg({ ok: false, text: accountAuthError(error) }); return }
+    if (data?.user) setAuthUser(data.user)
+    setNewEmail('')
+    setEmailMsg({ ok: true, text: `Almost done. We sent a confirmation link to ${current} and another to ${next}. Click both links. Your email changes after the second one.` })
+  }
+
+  async function savePassword() {
+    const { current, next, confirm } = pwForm
+    if (hasPassword && !current) { setPwMsg({ ok: false, text: 'Enter your current password.' }); return }
+    if (next.length < 8) { setPwMsg({ ok: false, text: 'Your new password must be at least 8 characters.' }); return }
+    if (next !== confirm) { setPwMsg({ ok: false, text: 'The new passwords don’t match.' }); return }
+    setAcctBusy('password'); setPwMsg(null)
+    if (hasPassword) {
+      // Re-check the current password before changing it
+      const { error: signErr } = await supabase.auth.signInWithPassword({ email: authUser.email, password: current })
+      if (signErr) {
+        setAcctBusy('')
+        const rate = signErr.code === 'over_request_rate_limit' || (signErr.message || '').toLowerCase().includes('rate limit')
+        setPwMsg({ ok: false, text: rate ? accountAuthError(signErr) : 'Your current password isn’t right.' })
+        return
+      }
+    }
+    const { data, error } = await supabase.auth.updateUser({ password: next, data: { has_password: true } })
+    setAcctBusy('')
+    if (error) { setPwMsg({ ok: false, text: accountAuthError(error) }); return }
+    if (data?.user) setAuthUser(data.user)
+    setPwForm({ current: '', next: '', confirm: '' })
+    setPwMsg({ ok: true, text: hasPassword ? 'Password updated.' : `Password set. You can now also log in with ${authUser.email} and this password.` })
+  }
+
+  async function toggleNotif(key) {
+    const prefs = member.notification_prefs || {}
+    const nextPrefs = { ...prefs, [key]: prefs[key] === false }
+    setAcctBusy(key)
+    const { error } = await supabase.from('members').update({ notification_prefs: nextPrefs }).eq('id', member.id)
+    setAcctBusy('')
+    if (error) { window.alert('Couldn’t save that. Please try again.'); return }
+    setMember(m => ({ ...m, notification_prefs: nextPrefs }))
+  }
+
   if (!member) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontFamily: 'var(--ui)', color: 'var(--txD)' }}>Loading...</div></div>
 
   const isOwner = currentUser && currentUser.id === member.id
@@ -330,9 +453,70 @@ export default function ProfilePage() {
             <div style={{ fontFamily: 'var(--hd)', fontSize: 22, fontWeight: 600, color: 'var(--ink)' }}>Account settings</div>
             <button onClick={() => { setTab('writing'); router.replace(`/profile/${id}`, undefined, { shallow: true }) }} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--txD)', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>← Back to profile</button>
           </div>
-          <div style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '20px 22px', marginBottom: 12 }}>
-            <div style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, color: 'var(--ink)', marginBottom: 4 }}>Email</div>
-            <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>{member.email}</div>
+          <div style={sectionLabel}>Profile</div>
+
+          {/* Name */}
+          <div style={cardStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={cardTitle}>Name</div>
+                {!nameForm && <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>{member.first_name} {member.last_name}</div>}
+              </div>
+              {!nameForm && <button onClick={() => { setNameForm({ first: member.first_name || '', last: member.last_name || '' }); setNameMsg(null) }} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--tc)', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>Edit</button>}
+            </div>
+            {nameForm && <div style={{ marginTop: 10 }}>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <input aria-label="First name" placeholder="First name" autoComplete="given-name" maxLength={50} value={nameForm.first} onChange={e => setNameForm(f => ({ ...f, first: e.target.value }))} style={fieldStyle} />
+                <input aria-label="Last name" placeholder="Last name" autoComplete="family-name" maxLength={50} value={nameForm.last} onChange={e => setNameForm(f => ({ ...f, last: e.target.value }))} style={fieldStyle} />
+              </div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <button disabled={acctBusy === 'name'} onClick={saveName} style={{ ...saveBtn, opacity: acctBusy === 'name' ? 0.6 : 1 }}>{acctBusy === 'name' ? 'Saving…' : 'Save name'}</button>
+                <button onClick={() => { setNameForm(null); setNameMsg(null) }} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--txD)', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>Cancel</button>
+              </div>
+            </div>}
+            <Msg m={nameMsg} />
+          </div>
+
+          <div style={sectionLabel}>Sign-in</div>
+
+          {/* Email */}
+          <div style={cardStyle}>
+            <div style={cardTitle}>Email</div>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', marginBottom: 12 }}>{authUser?.email || member.email}</div>
+            {authUser?.new_email && !emailMsg && <div style={{ ...cardHint, marginBottom: 12 }}>Waiting on a change to <strong>{authUser.new_email}</strong>. Click the confirmation links sent to both addresses to finish.</div>}
+            <input aria-label="New email" type="email" autoComplete="email" placeholder="New email address" value={newEmail} onChange={e => { setNewEmail(e.target.value); setEmailMsg(null) }} style={fieldStyle} />
+            <button disabled={acctBusy === 'email' || !newEmail.trim()} onClick={changeEmail} style={{ ...saveBtn, opacity: acctBusy === 'email' || !newEmail.trim() ? 0.6 : 1 }}>{acctBusy === 'email' ? 'Sending…' : 'Change email'}</button>
+            <Msg m={emailMsg} />
+          </div>
+
+          {/* Password */}
+          <div style={cardStyle}>
+            <div style={cardTitle}>{hasPassword ? 'Password' : 'Set a password'}</div>
+            {!hasPassword && <div style={{ ...cardHint, marginBottom: 12 }}>You sign in with Google. Add a password if you’d also like to log in with your email.</div>}
+            {hasPassword && <div style={{ height: 8 }} />}
+            {hasPassword && <input aria-label="Current password" type="password" autoComplete="current-password" placeholder="Current password" value={pwForm.current} onChange={e => { setPwForm(f => ({ ...f, current: e.target.value })); setPwMsg(null) }} style={fieldStyle} />}
+            <input aria-label="New password" type="password" autoComplete="new-password" placeholder="New password (at least 8 characters)" value={pwForm.next} onChange={e => { setPwForm(f => ({ ...f, next: e.target.value })); setPwMsg(null) }} style={fieldStyle} />
+            <input aria-label="Confirm new password" type="password" autoComplete="new-password" placeholder="Confirm new password" value={pwForm.confirm} onChange={e => { setPwForm(f => ({ ...f, confirm: e.target.value })); setPwMsg(null) }} style={fieldStyle} />
+            <button disabled={acctBusy === 'password'} onClick={savePassword} style={{ ...saveBtn, opacity: acctBusy === 'password' ? 0.6 : 1 }}>{acctBusy === 'password' ? 'Saving…' : hasPassword ? 'Change password' : 'Set password'}</button>
+            <Msg m={pwMsg} />
+          </div>
+
+          <div style={sectionLabel}>Notifications</div>
+
+          {/* In-app notifications (enforced by the notification_prefs.sql trigger) */}
+          <div style={cardStyle}>
+            {NOTIF_TYPES.map(([key, label, hint], i) => {
+              const on = (member.notification_prefs || {})[key] !== false
+              return (
+                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 0', borderTop: i ? '1px solid var(--bd)' : 'none' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={cardTitle}>{label}</div>
+                    <div style={cardHint}>{hint}</div>
+                  </div>
+                  <Switch on={on} label={label} disabled={acctBusy === key} onToggle={() => toggleNotif(key)} />
+                </div>
+              )
+            })}
           </div>
 
           {/* Club emails: hosts can email their club (pages/api/club-email.js); this opts out */}
