@@ -10,6 +10,9 @@
 //
 // Guards: caller must be signed in AND a host of the club; one email per club
 // per 24 hours (logged in club_emails); subject/body length caps.
+//
+// Addresses come from Supabase Auth (the member's current login email), not
+// members.email, which is kept blank so emails aren't publicly readable.
 
 import { createClient } from '@supabase/supabase-js'
 
@@ -87,12 +90,25 @@ export default async function handler(req, res) {
   // Recipients: members (not the sender), not opted out, not disabled, with an email
   const { data: rows, error: memErr } = await admin
     .from('club_members')
-    .select('member_id, member:members(id, email, first_name, status, club_email_opt_out)')
+    .select('member_id, member:members(id, first_name, status, club_email_opt_out)')
     .eq('club_id', clubId)
   if (memErr) return res.status(500).json({ error: 'Couldn’t load club members.', code: 'MEMBERS_ERROR' })
   const all = (rows || []).map(r => r.member).filter(m => m && m.id !== uid)
   const optedOut = all.filter(m => m.club_email_opt_out).length
-  const recipients = all.filter(m => !m.club_email_opt_out && m.status !== 'disabled' && /\S+@\S+\.\S+/.test(m.email || ''))
+  const eligible = all.filter(m => !m.club_email_opt_out && m.status !== 'disabled')
+  // Look up each eligible member's login email (a few at a time)
+  const emailById = {}
+  for (let i = 0; i < eligible.length; i += 10) {
+    await Promise.all(eligible.slice(i, i + 10).map(async m => {
+      try {
+        const { data } = await admin.auth.admin.getUserById(m.id)
+        if (data?.user?.email) emailById[m.id] = data.user.email
+      } catch (e) { /* skip this member */ }
+    }))
+  }
+  const recipients = eligible
+    .filter(m => /\S+@\S+\.\S+/.test(emailById[m.id] || ''))
+    .map(m => ({ ...m, email: emailById[m.id] }))
 
   const { data: sender } = await admin.from('members').select('first_name, last_name').eq('id', uid).maybeSingle()
   const hostName = [sender?.first_name, sender?.last_name].filter(Boolean).join(' ') || 'Your host'
