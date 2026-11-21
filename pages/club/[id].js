@@ -167,6 +167,11 @@ export default function ClubPage() {
   // Settings form state
   const [memberships, setMemberships] = useState([])
   const [settingsName, setSettingsName] = useState('')
+  // Host "Email members" (Settings): sends via /api/club-email
+  const [emailSubject, setEmailSubject] = useState('')
+  const [emailBody, setEmailBody] = useState('')
+  const [emailState, setEmailState] = useState('idle') // idle | confirm | sending | sent | error
+  const [emailMsg, setEmailMsg] = useState('')
   const [settingsDesc, setSettingsDesc] = useState('')
   const [settingsThemes, setSettingsThemes] = useState('')
   const [settingsSaved, setSettingsSaved] = useState(false)
@@ -274,6 +279,29 @@ export default function ClubPage() {
   useEffect(() => {
     if (view === 'chat') setChatUnread(0)
   }, [view])
+
+  async function sendClubEmail() {
+    setEmailState('sending'); setEmailMsg('')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const r = await fetch('/api/club-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token || ''}` },
+        body: JSON.stringify({ clubId: id, subject: emailSubject, body: emailBody }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        let msg = j.error || 'Something went wrong.'
+        if (j.code === 'DAILY_LIMIT' && j.nextAt) msg += ` You can send again ${new Date(j.nextAt).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}.`
+        setEmailMsg(`${msg}\nError code: ${j.code || 'HTTP-' + r.status}`); setEmailState('error'); return
+      }
+      setEmailMsg(`Sent to ${j.sent} ${j.sent === 1 ? 'member' : 'members'}${j.optedOut ? ` (${j.optedOut} turned club emails off)` : ''}. It's also posted in the club feed.${j.partial ? ' A few emails may not have gone out.' : ''}`)
+      setEmailState('sent'); setEmailSubject(''); setEmailBody('')
+      loadClub()
+    } catch (e) {
+      setEmailMsg('Couldn\u2019t reach the server. Check your connection and try again.\nError code: NETWORK'); setEmailState('error')
+    }
+  }
 
   async function loadClub() {
     const { data: c } = await supabase.from('clubs').select('*').eq('id', id).single()
@@ -1003,6 +1031,34 @@ export default function ClubPage() {
               </button>
             </div>
           </div>
+
+          {/* ── Email members (host only) ─────────────────────────────── */}
+          {isHost && <div style={{ marginBottom: 40 }}>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 20, paddingBottom: 10, borderBottom: '1px solid var(--bd)' }}>Email members</div>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.6, marginBottom: 16 }}>
+              Send a note to every member{'\u2019'}s inbox. It{'\u2019'}s also posted in the feed as an announcement. Members never see each other{'\u2019'}s addresses, and anyone can turn club emails off. One email per day.
+            </div>
+            <label className="field-label">Subject</label>
+            <input className="field-input" value={emailSubject} maxLength={120} placeholder="We meet Thursday at 7" onChange={e => { setEmailSubject(e.target.value); if (emailState !== 'sending') setEmailState('idle') }} />
+            <label className="field-label">Message</label>
+            <textarea className="field-input" value={emailBody} maxLength={5000} rows={6} style={{ resize: 'vertical' }} placeholder="What should everyone know?" onChange={e => { setEmailBody(e.target.value); if (emailState !== 'sending') setEmailState('idle') }} />
+            {emailState === 'confirm' ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--ink)' }}>Send to {Math.max(0, members.length - 1)} {members.length - 1 === 1 ? 'member' : 'members'}?</span>
+                <button onClick={sendClubEmail} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--tc)', border: 'none', borderRadius: 10, padding: '11px 20px', cursor: 'pointer' }}>Yes, send</button>
+                <button onClick={() => setEmailState('idle')} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 10, padding: '10px 18px', cursor: 'pointer' }}>Cancel</button>
+              </div>
+            ) : (
+              <button
+                disabled={emailState === 'sending' || !emailSubject.trim() || !emailBody.trim() || members.length < 2}
+                onClick={() => setEmailState('confirm')}
+                style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 10, padding: '12px 22px', cursor: 'pointer', opacity: (emailState === 'sending' || !emailSubject.trim() || !emailBody.trim() || members.length < 2) ? 0.5 : 1 }}>
+                {emailState === 'sending' ? 'Sending\u2026' : 'Email members'}
+              </button>
+            )}
+            {members.length < 2 && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', marginTop: 10 }}>Invite members first. There{'\u2019'}s no one to email yet.</div>}
+            {emailMsg && <div style={{ fontFamily: 'var(--ui)', fontSize: 13, marginTop: 12, lineHeight: 1.5, whiteSpace: 'pre-line', color: emailState === 'error' ? '#A0603E' : 'var(--sg)' }}>{emailMsg}</div>}
+          </div>}
 
           {/* ── SECTION 3: Members (host only) ───────────────────────── */}
           {isHost && <div style={{ marginBottom: 40 }}>
