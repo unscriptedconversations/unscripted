@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
+import TopNav from '../components/TopNav'
 import ManualBookAdd from '../components/ManualBookAdd'
 import { normalizeTags } from '../lib/tags'
 
@@ -150,10 +151,7 @@ export default function CreateClub() {
     <div style={{ minHeight: '100vh' }}>
       <title>Start a club — unscripted</title>
       <div className="shell">
-        <nav className="topnav">
-          <div className="brand" onClick={() => router.push('/')}><Logo /></div>
-          <div className="nav-links"><button className="nav-btn" onClick={() => router.push('/')}>Explore</button></div>
-        </nav>
+        <TopNav />
 
         <div style={{ maxWidth: 560, margin: '0 auto', paddingBottom: 80 }}>
           <button className="profile-back" onClick={() => router.back()}>← Back</button>
