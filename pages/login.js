@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
+import { APPLE_SIGNIN_ENABLED } from '../lib/flags'
 
 export default function Login() {
   const router = useRouter()
@@ -247,17 +248,19 @@ export default function Login() {
           {ssoLoading === 'google' ? 'Connecting…' : 'Continue with Google'}
         </button>
 
-        {/* Apple SSO */}
-        <button
-          style={{ ...ssoBtn, background: 'var(--ink)', color: '#FFF', border: 'none', opacity: ssoLoading === 'apple' ? 0.5 : 1 }}
-          onClick={() => handleSSO('apple')}
-          disabled={!!ssoLoading}
-        >
-          <svg width="16" height="18" viewBox="0 0 16 18" fill="none">
-            <path d="M13.173 9.558c-.022-2.185 1.786-3.244 1.867-3.295-1.017-1.49-2.601-1.694-3.162-1.715-1.346-.136-2.63.794-3.312.794-.681 0-1.734-.775-2.852-.754C4.1 4.611 2.587 5.648 1.757 7.22.054 10.403 1.312 15.1 2.962 17.671c.814 1.163 1.779 2.47 3.046 2.422 1.224-.049 1.683-.785 3.161-.785 1.478 0 1.894.785 3.186.762 1.314-.022 2.145-1.185 2.952-2.353.934-1.346 1.317-2.655 1.338-2.72-.03-.014-2.554-.976-2.472-3.44zM10.897 2.956C11.58 2.134 12.04.98 11.911-.21c-1.007.043-2.228.67-2.95 1.492-.646.74-1.213 1.929-1.06 3.065 1.125.086 2.273-.55 2.996-1.39z" fill="white"/>
-          </svg>
-          {ssoLoading === 'apple' ? 'Connecting…' : 'Continue with Apple'}
-        </button>
+        {/* Apple SSO (hidden until set up; see APPLE_SIGNIN_ENABLED in lib/flags.js) */}
+        {APPLE_SIGNIN_ENABLED && (
+          <button
+            style={{ ...ssoBtn, background: 'var(--ink)', color: '#FFF', border: 'none', opacity: ssoLoading === 'apple' ? 0.5 : 1 }}
+            onClick={() => handleSSO('apple')}
+            disabled={!!ssoLoading}
+          >
+            <svg width="16" height="18" viewBox="0 0 16 18" fill="none">
+              <path d="M13.173 9.558c-.022-2.185 1.786-3.244 1.867-3.295-1.017-1.49-2.601-1.694-3.162-1.715-1.346-.136-2.63.794-3.312.794-.681 0-1.734-.775-2.852-.754C4.1 4.611 2.587 5.648 1.757 7.22.054 10.403 1.312 15.1 2.962 17.671c.814 1.163 1.779 2.47 3.046 2.422 1.224-.049 1.683-.785 3.161-.785 1.478 0 1.894.785 3.186.762 1.314-.022 2.145-1.185 2.952-2.353.934-1.346 1.317-2.655 1.338-2.72-.03-.014-2.554-.976-2.472-3.44zM10.897 2.956C11.58 2.134 12.04.98 11.911-.21c-1.007.043-2.228.67-2.95 1.492-.646.74-1.213 1.929-1.06 3.065 1.125.086 2.273-.55 2.996-1.39z" fill="white"/>
+            </svg>
+            {ssoLoading === 'apple' ? 'Connecting…' : 'Continue with Apple'}
+          </button>
+        )}
 
         {/* Footer */}
         <div style={{ textAlign: 'center', marginTop: 36, paddingBottom: 48 }}>
