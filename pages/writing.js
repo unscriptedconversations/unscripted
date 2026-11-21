@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
-import Logo from '../components/Logo'
-import NotificationBell from '../components/NotificationBell'
-import { BRIDGE_ENABLED } from '../lib/flags'
+import TopNav from '../components/TopNav'
 
 function initialsFor(m) {
   if (m?.initials) return m.initials
@@ -64,24 +62,9 @@ export default function WritingFeed() {
     <div style={{ minHeight: '100vh' }}>
       <title>Writing — unscripted</title>
       <div className="shell">
-        <nav className="topnav">
-          <div className="brand" onClick={() => router.push('/')}><Logo /></div>
-          <div className="nav-links">
-            <button className="nav-btn" onClick={() => router.push('/')}>Explore</button>
-            {BRIDGE_ENABLED && <button className="nav-btn" onClick={() => router.push('/bridge')}>Bridge</button>}
-            <button className="nav-btn active">Writing</button>
-            {currentUser ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <NotificationBell currentUser={currentUser} />
-                <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
-                  <span className="user-nav-name">{currentUser.first_name}</span>
-                </div>
-              </div>
-            ) : (
-              <button className="join-btn" onClick={() => router.push('/signup')}>Join</button>
-            )}
-          </div>
-        </nav>
+        <TopNav>
+          <button className="nav-btn active">Writing</button>
+        </TopNav>
 
         <div style={{ maxWidth: 680, margin: '0 auto', paddingBottom: 80 }}>
           <section style={{ padding: '48px 0 28px' }}>
