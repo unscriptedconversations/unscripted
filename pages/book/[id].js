@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
-import Logo from '../../components/Logo'
+import TopNav from '../../components/TopNav'
 import { BRIDGE_ENABLED } from '../../lib/flags'
 
 export default function BookPage() {
@@ -169,25 +169,7 @@ export default function BookPage() {
     <div style={{ minHeight: '100vh' }}>
       <title>{book.title} — unscripted</title>
       <div className="shell">
-        <nav className="topnav">
-          <div className="brand" onClick={() => router.push('/')}><Logo /></div>
-          <div className="nav-links">
-            <button className="nav-btn" onClick={() => router.push('/')}>Explore</button>
-            {currentUser ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <div className="user-nav" onClick={() => router.push(`/profile/${currentUser.id}`)}>
-                  <span className="user-nav-name">{currentUser.first_name}</span>
-                </div>
-                <span style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--txD)', cursor: 'pointer' }} onClick={async () => { try { await supabase.auth.signOut({ scope: 'local' }) } catch (e) {} setCurrentUser(null) }}>Log out</span>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <span style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 600, color: 'var(--ink)', cursor: 'pointer' }} onClick={() => router.push('/login')}>Log in</span>
-                <button className="join-btn" onClick={() => router.push('/signup')}>Join</button>
-              </div>
-            )}
-          </div>
-        </nav>
+        <TopNav />
 
         <div style={{ paddingBottom: 80 }}>
           <button className="profile-back" onClick={() => router.push('/')}>← Explore</button>
