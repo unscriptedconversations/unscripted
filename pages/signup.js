@@ -33,6 +33,35 @@ const TOPIC_CATS = [
   },
 ]
 
+// Turn a Supabase auth error into a plain explanation plus a short code people
+// can quote when they contact us. Supabase sometimes returns an empty message
+// ("{}"), most often when the confirmation email couldn't be sent.
+const SUPPORT_EMAIL = 'unscriptedbookclub3@gmail.com'
+function explainAuthError(err) {
+  const msg = String(err?.message || '').trim()
+  const low = msg.toLowerCase()
+  const status = Number(err?.status) || 0
+  const code = (err?.code || (err?.name ? `${String(err.name).replace(/^Auth/, '').replace(/Error$/, '')}-${status || 'x'}` : `ERR-${status || 'x'}`)).toUpperCase()
+  const empty = !msg || msg === '{}' || msg === '[object Object]'
+  let text
+  if (err?.code === 'over_email_send_rate_limit' || status === 429 || low.includes('rate limit')) {
+    text = 'We\u2019ve sent too many emails in a short time. Please wait a few minutes and try again.'
+  } else if (err?.code === 'email_address_invalid' || (low.includes('email') && low.includes('invalid'))) {
+    text = 'That email address doesn\u2019t look right. Check it and try again.'
+  } else if (err?.code === 'weak_password' || low.includes('password')) {
+    text = 'Please choose a stronger password: at least 8 characters, mixing letters and numbers.'
+  } else if (err?.code === 'signup_disabled' || err?.code === 'email_provider_disabled') {
+    text = 'New signups are paused right now. Please try again later.'
+  } else if (err?.name === 'AuthRetryableFetchError' || status === 0 && empty) {
+    text = 'We couldn\u2019t reach our server. Check your connection and try again.'
+  } else if (empty || status >= 500 || low.includes('sending confirmation') || low.includes('database error')) {
+    text = `We couldn\u2019t finish creating your account. This usually means the confirmation email couldn\u2019t be sent. Please try again in a few minutes. If it keeps happening, email ${SUPPORT_EMAIL} with the code below.`
+  } else {
+    text = msg
+  }
+  return `${text}\nError code: ${code}`
+}
+
 export default function Signup() {
   const router = useRouter()
 
@@ -265,7 +294,8 @@ export default function Signup() {
           setTimeout(() => router.push(`/login?email=${encodeURIComponent(regData.email.trim())}`), 1800)
           return null
         }
-        setError(authErr.message)
+        console.error('signUp failed', authErr)
+        setError(explainAuthError(authErr))
         return null
       }
 
@@ -716,7 +746,7 @@ export default function Signup() {
               <div>
                 <div style={{ fontFamily: 'var(--hd)', fontSize: 28, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>Tell us about yourself.</div>
                 <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', marginBottom: 32 }}>Just the basics to get started.</div>
-                {error && <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: '#A0603E', background: 'rgba(160,96,62,0.08)', border: '1px solid rgba(160,96,62,0.2)', borderRadius: 10, padding: '12px 16px', marginBottom: 20 }}>{error}</div>}
+                {error && <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: '#A0603E', background: 'rgba(160,96,62,0.08)', border: '1px solid rgba(160,96,62,0.2)', borderRadius: 10, padding: '12px 16px', marginBottom: 20, whiteSpace: 'pre-line', lineHeight: 1.5 }}>{error}</div>}
 
                 <label style={fl}>First Name</label>
                 <input style={fi} placeholder="First name" value={regData.first} onChange={e => setRD(d => ({ ...d, first: e.target.value }))} />
@@ -823,7 +853,7 @@ export default function Signup() {
             {step === 0 && (
               <div>
                 <div style={{ fontFamily: 'var(--hd)', fontSize: 28, fontWeight: 600, color: 'var(--ink)', marginBottom: 32 }}>First, create your profile.</div>
-                {error && <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: '#A0603E', background: 'rgba(160,96,62,0.08)', borderRadius: 10, padding: '12px 16px', marginBottom: 20 }}>{error}</div>}
+                {error && <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: '#A0603E', background: 'rgba(160,96,62,0.08)', borderRadius: 10, padding: '12px 16px', marginBottom: 20, whiteSpace: 'pre-line', lineHeight: 1.5 }}>{error}</div>}
 
                 <label style={fl}>First Name</label>
                 <input style={fi} placeholder="First name" value={regData.first} onChange={e => setRD(d => ({ ...d, first: e.target.value }))} />
