@@ -111,9 +111,10 @@ export default function SearchPage() {
       ? `title.ilike.${like},author.ilike.${like},tags_norm.cs.{${nterm}}`
       : `title.ilike.${like},author.ilike.${like}`
 
+    // Hidden clubs (discoverable = false), and books in them, never appear in search.
     const [cR, bR, mR, wR, aR, brR] = await Promise.all([
-      supabase.from('clubs').select('id, name, description, privacy, tagline, tags').or(`name.ilike.${like},description.ilike.${like},tagline.ilike.${like},tags.cs.{${term}}`).limit(20),
-      supabase.from('books').select('id, title, author, tags, club_id, club:clubs(name)').or(booksOr).limit(20),
+      supabase.from('clubs').select('id, name, description, privacy, tagline, tags').eq('discoverable', true).or(`name.ilike.${like},description.ilike.${like},tagline.ilike.${like},tags.cs.{${term}}`).limit(20),
+      supabase.from('books').select('id, title, author, tags, club_id, club:clubs!inner(name, discoverable)').eq('club.discoverable', true).or(booksOr).limit(20),
       supabase.from('magazines').select('id, title, publisher, description, tags, cover_url, website, founded').or(`title.ilike.${like},publisher.ilike.${like},description.ilike.${like},tags.cs.{${term}}`).limit(20),
       supabase.from('writings').select('id, title, content, format, published_at, member_id, tags, author:members(id, first_name, last_name, initials, color)').eq('is_published', true).or(`title.ilike.${like},content.ilike.${like},tags.cs.{${term}}`).limit(20),
       supabase.from('members').select('id, first_name, last_name, initials, color').or('status.is.null,status.neq.disabled').or(`first_name.ilike.${like},last_name.ilike.${like}`).limit(12),
@@ -128,7 +129,7 @@ export default function SearchPage() {
     const extraIds = [...new Set(bookHits.map(b => b.club_id).filter(id => id && !have.has(id)))].slice(0, 12)
     let extra = []
     if (extraIds.length) {
-      const { data: xc } = await supabase.from('clubs').select('id, name, description, privacy, tagline, tags').in('id', extraIds)
+      const { data: xc } = await supabase.from('clubs').select('id, name, description, privacy, tagline, tags').eq('discoverable', true).in('id', extraIds)
       extra = (xc || []).map(c => ({ ...c, reading: bookHits.find(b => b.club_id === c.id)?.title }))
     }
     setClubs([...(cR.data || []), ...extra])
