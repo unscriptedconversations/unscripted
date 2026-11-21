@@ -489,6 +489,20 @@ export default function ClubPage() {
 
   // Deleting: authors delete their own posts/replies; hosts can remove anyone's
   // in this club. remove_content() in SQL enforces the same rules server-side.
+  // "Write your first post": bring the feed compose box into view, put the
+  // cursor in it (opens the keyboard on phones), and glow it briefly.
+  function focusCompose() {
+    const el = document.getElementById('feed-compose')
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.focus({ preventScroll: true })
+    const box = el.closest('.compose') || el
+    const prev = box.style.boxShadow
+    box.style.transition = 'box-shadow 0.3s'
+    box.style.boxShadow = '0 0 0 3px var(--tc)'
+    setTimeout(() => { box.style.boxShadow = prev }, 1400)
+  }
+
   const canDelete = authorId => !!currentUser && (authorId === currentUser.id || isHost)
   async function removeItem(kind, itemId) {
     setDeleting(true)
@@ -823,7 +837,7 @@ export default function ClubPage() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 18 }}>{'\u270D\uFE0F'}</span>
                 <div style={{ flex: 1, minWidth: 180, fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.5 }}><strong style={{ color: 'var(--ink)' }}>Say hello.</strong> Your first post warms up the room.</div>
-                <button onClick={() => document.getElementById('feed-compose')?.focus()} style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--tc)', border: 'none', borderRadius: 8, padding: '9px 14px', cursor: 'pointer' }}>Write your first post</button>
+                <button onClick={focusCompose} style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--tc)', border: 'none', borderRadius: 8, padding: '9px 14px', cursor: 'pointer' }}>Write your first post</button>
                 <button onClick={() => setShowHow(v => !v)} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--txD)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textDecoration: 'underline' }}>{showHow ? 'Hide' : 'How it works'}</button>
               </div>
               {showHow && <div style={{ textAlign: 'left', marginTop: 16, borderTop: '1px solid var(--bd)', paddingTop: 20, display: 'grid', gap: 16 }}>
