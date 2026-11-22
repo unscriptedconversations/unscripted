@@ -37,6 +37,33 @@ const TOPIC_CATS = [
 // can quote when they contact us. Supabase sometimes returns an empty message
 // ("{}"), most often when the confirmation email couldn't be sent.
 const SUPPORT_EMAIL = 'unscriptedbookclub3@gmail.com'
+
+// Signing up with Google leaves the site; this remembers whether they were
+// starting a club (and which book) so /signup?oauth=true can pick it up.
+const OAUTH_STASH_KEY = 'unscripted_oauth_signup'
+const OAUTH_STASH_MAX_MS = 60 * 60 * 1000
+
+function GoogleSignupButton({ onClick, loading }) {
+  return (
+    <>
+      <button type="button" onClick={onClick} disabled={loading}
+        style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 600, color: 'var(--ink)', background: 'var(--sf)', border: '1.5px solid var(--bd2)', borderRadius: 10, padding: '13px 28px', cursor: loading ? 'default' : 'pointer', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, boxSizing: 'border-box', opacity: loading ? 0.5 : 1 }}>
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+          <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/>
+          <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853"/>
+          <path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
+          <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
+        </svg>
+        {loading ? 'Connecting\u2026' : 'Continue with Google'}
+      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, margin: '20px 0 24px' }}>
+        <div style={{ flex: 1, height: 1, background: 'var(--bd2)' }} />
+        <span style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', letterSpacing: 1 }}>or sign up with email</span>
+        <div style={{ flex: 1, height: 1, background: 'var(--bd2)' }} />
+      </div>
+    </>
+  )
+}
 function explainAuthError(err) {
   const msg = String(err?.message || '').trim()
   const low = msg.toLowerCase()
@@ -103,21 +130,55 @@ export default function Signup() {
 
   // OAuth completion mode (coming from /auth/callback with ?oauth=true)
   const isOAuth = router.query.oauth === 'true'
+  const [googleLoading, setGoogleLoading] = useState(false)
+
+  async function signUpWithGoogle() {
+    setError('')
+    setGoogleLoading(true)
+    try {
+      window.localStorage.setItem(OAUTH_STASH_KEY, JSON.stringify({
+        mode: mode || 'individual',
+        bookTitle: mode === 'club' ? (clubData.bookTitle || '') : '',
+        bookAuthor: mode === 'club' ? (clubData.bookAuthor || '') : '',
+        at: Date.now(),
+      }))
+    } catch (e) {}
+    const { error: err } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    })
+    if (err) {
+      setError('Couldn\u2019t connect to Google. Please try again, or sign up with email.')
+      setGoogleLoading(false)
+    }
+    // On success the browser leaves for Google
+  }
 
   // On OAuth flow, get the existing session and pre-populate email
   useEffect(() => {
     if (!isOAuth) return
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) { router.replace('/login'); return }
-      const meta = session.user.user_metadata
+      const meta = session.user.user_metadata || {}
+      const full = meta.full_name || meta.name || ''
       setRD(d => ({
         ...d,
         email: session.user.email || '',
-        first: meta?.full_name?.split(' ')[0] || '',
-        last:  meta?.full_name?.split(' ').slice(1).join(' ') || '',
+        first: meta.given_name || full.split(' ')[0] || '',
+        last:  meta.family_name || full.split(' ').slice(1).join(' ') || '',
       }))
-      // Pre-select mode as individual for OAuth flow
-      setMode('individual')
+      // Started on the signup page? Restore reader vs. host (and the book).
+      let stash = null
+      try {
+        stash = JSON.parse(window.localStorage.getItem(OAUTH_STASH_KEY) || 'null')
+        window.localStorage.removeItem(OAUTH_STASH_KEY)
+      } catch (e) {}
+      if (stash && Date.now() - (stash.at || 0) < OAUTH_STASH_MAX_MS && stash.mode === 'club') {
+        if (stash.bookTitle) setCD(d => ({ ...d, bookTitle: stash.bookTitle, bookAuthor: stash.bookAuthor || '' }))
+        setMode('club')
+      } else {
+        setMode('individual')
+      }
       setStep(0)
     })
   }, [isOAuth])
@@ -746,6 +807,7 @@ export default function Signup() {
               <div>
                 <div style={{ fontFamily: 'var(--hd)', fontSize: 28, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>Tell us about yourself.</div>
                 <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', marginBottom: 32 }}>Just the basics to get started.</div>
+                {!isOAuth && !createdUser && <GoogleSignupButton onClick={signUpWithGoogle} loading={googleLoading} />}
                 {error && <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: '#A0603E', background: 'rgba(160,96,62,0.08)', border: '1px solid rgba(160,96,62,0.2)', borderRadius: 10, padding: '12px 16px', marginBottom: 20, whiteSpace: 'pre-line', lineHeight: 1.5 }}>{error}</div>}
 
                 <label style={fl}>First Name</label>
@@ -853,6 +915,7 @@ export default function Signup() {
             {step === 0 && (
               <div>
                 <div style={{ fontFamily: 'var(--hd)', fontSize: 28, fontWeight: 600, color: 'var(--ink)', marginBottom: 32 }}>First, create your profile.</div>
+                {!isOAuth && !createdUser && <GoogleSignupButton onClick={signUpWithGoogle} loading={googleLoading} />}
                 {error && <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: '#A0603E', background: 'rgba(160,96,62,0.08)', borderRadius: 10, padding: '12px 16px', marginBottom: 20, whiteSpace: 'pre-line', lineHeight: 1.5 }}>{error}</div>}
 
                 <label style={fl}>First Name</label>
@@ -860,8 +923,9 @@ export default function Signup() {
                 <label style={fl}>Last Name</label>
                 <input style={fi} placeholder="Last name" value={regData.last} onChange={e => setRD(d => ({ ...d, last: e.target.value }))} />
                 <label style={fl}>Email</label>
-                <input style={fi} placeholder="you@email.com" type="email" value={regData.email} onChange={e => setRD(d => ({ ...d, email: e.target.value }))} />
+                <input style={fi} placeholder="you@email.com" type="email" value={regData.email} onChange={e => setRD(d => ({ ...d, email: e.target.value }))} disabled={isOAuth} />
 
+                {!isOAuth && <>
                 <label style={fl}>Password</label>
                 <div style={{ position: 'relative', marginBottom: 24 }}>
                   <input
@@ -875,11 +939,12 @@ export default function Signup() {
                     {showPw ? 'Hide' : 'Show'}
                   </button>
                 </div>
+                </>}
 
                 <button style={{ ...btn, opacity: loading ? 0.5 : 1 }} disabled={loading} onClick={async () => {
                   setError('')
                   if (!regData.first.trim() || !regData.last.trim() || !regData.email.trim()) { setError('All fields are required.'); return }
-                  if (regData.password.length < 8) { setError('Password must be at least 8 characters.'); return }
+                  if (!isOAuth && regData.password.length < 8) { setError('Password must be at least 8 characters.'); return }
                   if (createdUser) { setStep(2); return }
                   const user = await createAccount()
                   if (user) setStep(2)
