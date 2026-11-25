@@ -177,6 +177,12 @@ export default function ClubPage() {
   const [settingsSaved, setSettingsSaved] = useState(false)
   const [settingsMeeting, setSettingsMeeting] = useState('')
   const [leaveConfirm, setLeaveConfirm] = useState(false)
+  const [bookDelConfirm, setBookDelConfirm] = useState(null) // book id awaiting "Remove?" confirmation
+  const [bookDeleting, setBookDeleting] = useState(false)
+  const [clubDelOpen, setClubDelOpen] = useState(false)
+  const [clubDelName, setClubDelName] = useState('')
+  const [clubDeleting, setClubDeleting] = useState(false)
+  const [clubDelError, setClubDelError] = useState('')
   const [inviteCopied, setInviteCopied] = useState(false)
   const [profileReplyCount, setProfileReplyCount] = useState(0)
   const [showHow, setShowHow] = useState(false)
@@ -476,6 +482,36 @@ export default function ClubPage() {
       setSettingsSaved(true)
       setTimeout(() => setSettingsSaved(false), 2500)
     }
+  }
+
+  // Host removes a book; its discussion threads and replies go with it
+  // (remove_book() in SQL checks the host and relies on ON DELETE CASCADE).
+  async function removeBook(bookId) {
+    setBookDeleting(true)
+    const { error } = await supabase.rpc('remove_book', { p_book_id: String(bookId) })
+    setBookDeleting(false)
+    setBookDelConfirm(null)
+    if (error) { window.alert('Sorry, that book couldn\u2019t be removed. Please try again.'); return }
+    const remaining = books.filter(b => b.id !== bookId)
+    setBooks(remaining)
+    if (selBook === bookId) setSelBook(remaining[0]?.id || null)
+    loadClub()
+  }
+
+  // Creator deletes the whole club (delete_club() in SQL checks creator + name)
+  async function deleteClub() {
+    setClubDelError('')
+    setClubDeleting(true)
+    const { error } = await supabase.rpc('delete_club', { p_club_id: id, p_confirm_name: clubDelName })
+    setClubDeleting(false)
+    if (error) {
+      const msg = error.message || ''
+      setClubDelError(msg.includes('NAME_MISMATCH') ? 'That doesn\u2019t match the club name.'
+        : msg.includes('NOT_CREATOR') ? 'Only the person who started this club can delete it.'
+        : 'Sorry, the club couldn\u2019t be deleted. Please try again.')
+      return
+    }
+    router.push('/')
   }
 
   async function leaveClub() {
@@ -1060,6 +1096,39 @@ export default function ClubPage() {
             {emailMsg && <div style={{ fontFamily: 'var(--ui)', fontSize: 13, marginTop: 12, lineHeight: 1.5, whiteSpace: 'pre-line', color: emailState === 'error' ? '#A0603E' : 'var(--sg)' }}>{emailMsg}</div>}
           </div>}
 
+          {/* ── Books (host only): remove a book and its discussions ──── */}
+          {isHost && <div style={{ marginBottom: 40 }}>
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 20, paddingBottom: 10, borderBottom: '1px solid var(--bd)' }}>Books</div>
+            {books.length === 0 && <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>No books yet.</div>}
+            {books.map(b => {
+              const n = threads.filter(t => t.book_id === b.id).length
+              return (
+                <div key={b.id} style={{ padding: '14px 0', borderBottom: '1px solid var(--bd)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>{b.title}</div>
+                      <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{[b.author, b.status === 'current' ? 'Reading now' : b.status === 'completed' ? 'Finished' : null].filter(Boolean).join(' \u00B7 ')}</div>
+                    </div>
+                    {bookDelConfirm !== b.id && (
+                      <button onClick={() => setBookDelConfirm(b.id)} style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 600, color: 'var(--txD)', background: 'none', border: '1px solid var(--bd2)', borderRadius: 6, padding: '6px 12px', cursor: 'pointer' }}>Remove</button>
+                    )}
+                  </div>
+                  {bookDelConfirm === b.id && (
+                    <div style={{ marginTop: 10, background: 'rgba(160,96,62,0.06)', border: '1px solid rgba(160,96,62,0.2)', borderRadius: 10, padding: '12px 14px' }}>
+                      <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--ink)', lineHeight: 1.5, marginBottom: 10 }}>
+                        Remove <strong>{b.title}</strong>{n > 0 ? ` and its ${n} ${n === 1 ? 'discussion' : 'discussions'}` : ''}? This can{'\u2019'}t be undone.
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button disabled={bookDeleting} onClick={() => removeBook(b.id)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: '#FFF', background: '#A0603E', border: 'none', borderRadius: 8, padding: '9px 16px', cursor: 'pointer', opacity: bookDeleting ? 0.6 : 1 }}>{bookDeleting ? 'Removing\u2026' : 'Yes, remove'}</button>
+                        <button onClick={() => setBookDelConfirm(null)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '8px 14px', cursor: 'pointer' }}>Cancel</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>}
+
           {/* ── SECTION 3: Members (host only) ───────────────────────── */}
           {isHost && <div style={{ marginBottom: 40 }}>
             <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 20, paddingBottom: 10, borderBottom: '1px solid var(--bd)' }}>Members</div>
@@ -1116,6 +1185,38 @@ export default function ClubPage() {
                 </div>
               </div>
             )}
+
+            {/* Delete club: creator only, type the name to confirm */}
+            {club.creator_id === currentUser?.id && <div style={{ marginTop: 16 }}>
+              {!clubDelOpen ? (
+                <button onClick={() => { setClubDelOpen(true); setClubDelName(''); setClubDelError('') }}
+                  style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#A0603E', background: 'none', border: '1.5px solid rgba(160,96,62,0.3)', borderRadius: 10, padding: '13px 24px', cursor: 'pointer', width: '100%' }}>
+                  Delete this club
+                </button>
+              ) : (
+                <div style={{ background: 'rgba(160,96,62,0.06)', border: '1.5px solid rgba(160,96,62,0.2)', borderRadius: 14, padding: '24px' }}>
+                  <div style={{ fontFamily: 'var(--hd)', fontSize: 18, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>Delete {club.name} for everyone?</div>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.6, marginBottom: 16 }}>
+                    This permanently deletes the club, its posts, books and discussions for all {members.length} {members.length === 1 ? 'member' : 'members'}. Members{'\u2019'} accounts aren{'\u2019'}t affected. This can{'\u2019'}t be undone.
+                  </div>
+                  <label className="field-label">Type the club name to confirm</label>
+                  <input className="field-input" value={clubDelName} placeholder={club.name} onChange={e => { setClubDelName(e.target.value); setClubDelError('') }} aria-label="Club name" />
+                  {clubDelError && <div role="status" style={{ fontFamily: 'var(--ui)', fontSize: 12, color: '#A0603E', marginTop: -8, marginBottom: 12 }}>{clubDelError}</div>}
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button
+                      disabled={clubDeleting || clubDelName.trim().toLowerCase() !== (club.name || '').trim().toLowerCase()}
+                      onClick={deleteClub}
+                      style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: '#A0603E', border: 'none', borderRadius: 10, padding: '13px 24px', cursor: 'pointer', flex: 1, opacity: (clubDeleting || clubDelName.trim().toLowerCase() !== (club.name || '').trim().toLowerCase()) ? 0.5 : 1 }}>
+                      {clubDeleting ? 'Deleting\u2026' : 'Delete club'}
+                    </button>
+                    <button onClick={() => setClubDelOpen(false)}
+                      style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 10, padding: '13px 24px', cursor: 'pointer' }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>}
           </div>
         </div>}
 
