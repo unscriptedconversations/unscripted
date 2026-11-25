@@ -1127,6 +1127,7 @@ export default function ClubPage() {
                 </div>
               )
             })}
+            <button onClick={() => setShowAddBook(true)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 10, padding: '11px 20px', cursor: 'pointer', marginTop: 16 }}>+ Add book</button>
           </div>}
 
           {/* ── SECTION 3: Members (host only) ───────────────────────── */}
