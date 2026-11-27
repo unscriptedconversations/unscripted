@@ -423,9 +423,18 @@ export default function ClubPage() {
     setBkL(true)
     timer.current = setTimeout(async () => {
       try {
-        const r = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(val)}&limit=5&fields=title,author_name,first_publish_year,cover_i`)
+        // Ask for the best-matching English edition too: a work's own title and
+        // cover come from its original edition, so translated books (e.g. I Who
+        // Have Never Known Men, first published in French) would show in the
+        // original language. Falls back to the work when there's no edition data.
+        const r = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(val)}&lang=en&limit=5&fields=title,author_name,first_publish_year,cover_i,editions,editions.title,editions.cover_i,editions.language`)
         const d = await r.json()
-        setBkR((d.docs || []).map(b => ({ title: b.title, author: (b.author_name || [])[0] || 'Unknown', year: b.first_publish_year, cover: b.cover_i ? `https://covers.openlibrary.org/b/id/${b.cover_i}-S.jpg` : null })))
+        setBkR((d.docs || []).map(b => {
+          const ed = b.editions?.docs?.[0]
+          const title = ed?.title || b.title
+          const coverId = ed ? ed.cover_i : b.cover_i
+          return { title, author: (b.author_name || [])[0] || 'Unknown', year: b.first_publish_year, cover: coverId ? `https://covers.openlibrary.org/b/id/${coverId}-S.jpg` : null }
+        }).filter(b => b.title))
       } catch (e) { setBkR([]) }
       setBkL(false)
     }, 400)
