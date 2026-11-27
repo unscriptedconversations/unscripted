@@ -3,10 +3,11 @@ import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
 import TopNav from '../../components/TopNav'
 import { BRIDGE_ENABLED } from '../../lib/flags'
+import { preferredTitle } from '../../lib/olSearch'
 
 // Open Library fields incl. the best-matching English edition (lang=en), so
 // translated books show their English title and cover, not the original's.
-const OL_FIELDS = 'title,author_name,cover_i,subject,first_publish_year,editions,editions.title,editions.cover_i'
+const OL_FIELDS = 'title,author_name,cover_i,subject,first_publish_year,editions,editions.title,editions.cover_i,editions.language'
 
 export default function BookPage() {
   const router = useRouter()
@@ -81,7 +82,8 @@ export default function BookPage() {
         setNotFound(true); return
       }
       const ed = doc.editions?.docs?.[0]
-      const title = ed?.title || doc.title
+      // Edition title only for real translations (not "… Christmas edition")
+      const title = preferredTitle(doc.title, ed)
       const b = {
         ...(saved || {}),
         id: saved ? saved.id : key,
@@ -93,7 +95,7 @@ export default function BookPage() {
       }
       setBook(b)
       setBookKey(key)
-      const coverId = ed ? ed.cover_i : doc.cover_i
+      const coverId = title !== doc.title ? ed?.cover_i : (doc.cover_i || ed?.cover_i)
       if (coverId) setCoverUrl(`https://covers.openlibrary.org/b/id/${coverId}-L.jpg`)
       else fetchCover(title, b.author)
       // Older saves may lack the ID or use the original-language title
