@@ -7,6 +7,9 @@
 //     a title). Published pieces never autosave: edits go live only when you
 //     press Update.
 //   - Saves check for errors and say so; nothing claims "Saved" unless it was.
+//   - Optional cover image (Supabase Storage bucket "covers", your own folder).
+//   - The first publish of a piece emails it to the writer's followers
+//     (pages/api/writing-email.js; once per piece, never on updates).
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
@@ -17,6 +20,8 @@ import { renderRich, plainText } from '../lib/formatText'
 const REFLECTION_MAX = 300
 const AUTOSAVE_MS = 2500
 const WORDS_PER_MIN = 230
+const COVER_MAX_BYTES = 5 * 1024 * 1024
+const COVER_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
 const FORMATS = [
   { id: 'reflection', label: 'Reflection', desc: `A few paragraphs · up to ${REFLECTION_MAX} words` },
   { id: 'essay', label: 'Essay', desc: 'Long-form' },
@@ -51,6 +56,9 @@ export default function Write() {
   const [format, setFormat] = useState('reflection')
   const [clubId, setClubId] = useState('')
   const [tagsInput, setTagsInput] = useState('')
+  const [coverUrl, setCoverUrl] = useState('')
+  const [coverBusy, setCoverBusy] = useState(false)
+  const [coverError, setCoverError] = useState('')
   const [writingId, setWritingId] = useState(null)
   const [isPublished, setIsPublished] = useState(false)
   const [loaded, setLoaded] = useState(false)             // an existing piece has loaded (or this is a new one)
@@ -111,7 +119,7 @@ export default function Write() {
   }, [router.isReady])
 
   // Keep the newest values where the autosave timer can see them
-  latest.current = { title, subtitle, content, format, clubId, tagsInput, writingId, isPublished, currentUser }
+  latest.current = { title, subtitle, content, format, clubId, tagsInput, coverUrl, writingId, isPublished, currentUser }
 
   // Autosave drafts a moment after typing stops (needs a title)
   useEffect(() => {
@@ -121,7 +129,7 @@ export default function Write() {
     saveTimer.current = setTimeout(() => { persist(false, { auto: true }) }, AUTOSAVE_MS)
     return () => clearTimeout(saveTimer.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, subtitle, content, tagsInput, clubId, format, dirty, loaded, isPublished, currentUser])
+  }, [title, subtitle, content, tagsInput, clubId, format, coverUrl, dirty, loaded, isPublished, currentUser])
 
   // Warn before leaving with unsaved changes
   useEffect(() => {
@@ -154,6 +162,7 @@ export default function Write() {
       setFormat(data.format || 'reflection')
       setClubId(data.club_id || '')
       setTagsInput((data.tags || []).join(', '))
+      setCoverUrl(data.cover_url || '')
       setIsPublished(!!data.is_published)
       if (data.updated_at) { setSavedAt(new Date(data.updated_at)); setStatus('saved') }
     }
@@ -217,7 +226,7 @@ export default function Write() {
   // Save the piece. publish=false keeps it a draft (or moves a published piece
   // back to drafts); publish=true publishes or updates it.
   async function persist(publish, { auto = false } = {}) {
-    const v = latest.current
+    const v = { ...latest.current }   // snapshot: the live object changes as the save completes
     if (!v.currentUser || !v.title.trim()) return false
     if (inFlight.current) { if (auto) { saveTimer.current = setTimeout(() => persist(false, { auto: true }), 800) } return false }
     inFlight.current = true
@@ -229,6 +238,7 @@ export default function Write() {
       content: v.content.trim(),
       format: v.format,
       club_id: v.clubId || null,
+      cover_url: v.coverUrl || null,
       tags: v.tagsInput.split(',').map(t => t.trim()).filter(Boolean),
       is_published: publish,
       updated_at: new Date().toISOString(),
@@ -258,17 +268,47 @@ export default function Write() {
     }
     // Only clear "unsaved" if nothing changed while this save was running
     const now = latest.current
-    if (now.title === v.title && now.subtitle === v.subtitle && now.content === v.content && now.tagsInput === v.tagsInput && now.clubId === v.clubId && now.format === v.format) setDirty(false)
+    if (now.title === v.title && now.subtitle === v.subtitle && now.content === v.content && now.tagsInput === v.tagsInput && now.clubId === v.clubId && now.format === v.format && now.coverUrl === v.coverUrl) setDirty(false)
     setIsPublished(publish)
     latest.current.isPublished = publish
     setSavedAt(new Date()); setStatus('saved')
     loadCounts(v.currentUser.id)
+    // First publish only: email followers (fire-and-forget; the server also
+    // refuses to send the same piece twice)
+    if (publish && !v.isPublished && savedId) notifyFollowers(savedId)
     if (publish && savedId) {
       setPublishOpen(false)
       setJustPublished({ id: savedId, title: v.title.trim(), club: myClubs.find(c => c.id === v.clubId) || null })
       window.scrollTo(0, 0)
     }
     return true
+  }
+
+  async function notifyFollowers(wid) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return
+      fetch('/api/writing-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ writingId: wid }),
+      }).catch(() => {})
+    } catch (e) { /* never block publishing */ }
+  }
+
+  async function uploadCover(file) {
+    if (!file || !currentUser) return
+    setCoverError('')
+    if (!COVER_TYPES.includes(file.type)) { setCoverError('Please choose a JPG, PNG, WebP or GIF image.'); return }
+    if (file.size > COVER_MAX_BYTES) { setCoverError('That image is over 5 MB. Please choose a smaller one.'); return }
+    setCoverBusy(true)
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'jpg'
+    const path = `${currentUser.id}/${Date.now()}.${ext}`
+    const { error } = await supabase.storage.from('covers').upload(path, file, { contentType: file.type, upsert: false })
+    setCoverBusy(false)
+    if (error) { setCoverError('Sorry, the image couldn\u2019t be uploaded. Please try again.'); return }
+    const { data } = supabase.storage.from('covers').getPublicUrl(path)
+    if (data?.publicUrl) { setCoverUrl(data.publicUrl); setDirty(true) }
   }
 
   async function publishNow() {
@@ -303,7 +343,7 @@ export default function Write() {
   // Start a fresh piece in place (after publishing)
   function writeAnother() {
     setJustPublished(null); setWritingId(null); setIsPublished(false)
-    setTitle(''); setSubtitle(''); setContent(''); setTagsInput(''); setClubId(''); setFormat('reflection')
+    setTitle(''); setSubtitle(''); setContent(''); setTagsInput(''); setClubId(''); setFormat('reflection'); setCoverUrl(''); setCoverError('')
     setSuggestNote(''); setDirty(false); setStatus('idle'); setSavedAt(null); setSaveError('')
     router.replace('/write', undefined, { shallow: true })
     window.scrollTo(0, 0)
@@ -498,8 +538,26 @@ export default function Write() {
             </select>
           </div>}
 
+          <label style={{ ...fl, marginTop: 20 }}>Cover image (optional)</label>
+          {coverUrl ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <img src={coverUrl} alt="Cover" style={{ width: 120, height: 68, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--bd)' }} />
+              <label style={{ ...meta, fontWeight: 600, color: 'var(--tc)', cursor: 'pointer' }}>
+                Change<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" style={{ display: 'none' }} onChange={e => { uploadCover(e.target.files?.[0]); e.target.value = '' }} />
+              </label>
+              <button type="button" onClick={() => { setCoverUrl(''); setDirty(true) }} style={{ ...meta, fontWeight: 600, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>Remove</button>
+            </div>
+          ) : (
+            <label style={{ display: 'block', textAlign: 'center', padding: '18px', border: '1.5px dashed var(--bd2)', borderRadius: 12, ...meta, cursor: coverBusy ? 'default' : 'pointer' }}>
+              {coverBusy ? 'Uploading\u2026' : 'Add a cover image (JPG, PNG, WebP or GIF, up to 5 MB)'}
+              <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={coverBusy} style={{ display: 'none' }} onChange={e => { uploadCover(e.target.files?.[0]); e.target.value = '' }} />
+            </label>
+          )}
+          {coverError && <div role="alert" style={{ fontFamily: 'var(--ui)', fontSize: 12, color: '#A0603E', marginTop: 6 }}>{coverError}</div>}
+
           <label style={{ ...fl, marginTop: 24 }}>Preview</label>
-          <div style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '18px 20px' }}>
+          {coverUrl && <img src={coverUrl} alt="" style={{ display: 'block', width: '100%', maxHeight: 180, objectFit: 'cover', borderRadius: '14px 14px 0 0', border: '1px solid var(--bd)', borderBottom: 'none' }} />}
+          <div style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: coverUrl ? '0 0 14px 14px' : 14, padding: '18px 20px' }}>
             <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--tc)', marginBottom: 6 }}>
               {FORMATS.find(f => f.id === format)?.label}{clubId ? ` · ${myClubs.find(c => c.id === clubId)?.name || ''}` : ''}
             </div>
