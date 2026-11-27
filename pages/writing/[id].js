@@ -3,6 +3,7 @@ import { useRouter } from 'next/router'
 import { supabase } from '../../lib/supabase'
 import TopNav from '../../components/TopNav'
 import { createNotification } from '../../lib/notify'
+import { renderRich, plainText } from '../../lib/formatText'
 
 function MemberAvatar({ member, size = 36 }) {
   return <div style={{ width: size, height: size, borderRadius: '50%', background: member?.color || '#8B6E52', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.34, fontWeight: 700, fontFamily: 'var(--ui)', color: '#FFF', flexShrink: 0 }}>{member?.initials || '?'}</div>
@@ -15,8 +16,6 @@ function dateLabel(d) {
   return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) })
 }
 function readMinutes(t) { const n = String(t || '').trim() ? String(t).trim().split(/\s+/).length : 0; return Math.max(1, Math.round(n / 230)) }
-// Blank lines separate paragraphs; single line breaks are kept inside them
-function paragraphs(t) { return String(t || '').replace(/\r\n/g, '\n').split(/\n\s*\n/).map(p => p.trim()).filter(Boolean) }
 
 const FORMAT_LABEL = { essay: 'Essay', reflection: 'Reflection', note: 'Note' }
 
@@ -151,7 +150,7 @@ export default function WritingPage() {
   const kicker = { fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--tc)' }
   const smallBtn = { fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', borderRadius: 8, padding: '9px 16px', cursor: 'pointer' }
   const followBtn = { ...smallBtn, color: following ? 'var(--sg)' : 'var(--ink)', background: following ? 'rgba(94,122,98,0.1)' : 'none', border: following ? '1.5px solid transparent' : '1.5px solid var(--bd2)' }
-  const mins = readMinutes(writing.content)
+  const mins = readMinutes(plainText(writing.content))
 
   return (
     <div style={{ minHeight: '100vh' }}>
@@ -183,7 +182,7 @@ export default function WritingPage() {
         </div>}
 
         <div style={{ fontFamily: 'var(--hd)', fontSize: 21, color: 'var(--ink)', lineHeight: 1.8 }}>
-          {paragraphs(writing.content).map((p, i) => <p key={i} style={{ margin: '0 0 1.15em', whiteSpace: 'pre-wrap' }}>{p}</p>)}
+          {renderRich(writing.content)}
         </div>
 
         {(writing.tags || []).length > 0 && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 28 }}>
@@ -255,7 +254,7 @@ export default function WritingPage() {
               <div style={{ ...kicker, fontSize: 9 }}>{FORMAT_LABEL[w.format] || 'Writing'}</div>
               <div style={{ fontFamily: 'var(--hd)', fontSize: 20, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.25, marginTop: 4 }}>{w.title}</div>
               {w.subtitle && <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontStyle: 'italic', color: 'var(--txD)', marginTop: 2 }}>{w.subtitle}</div>}
-              <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginTop: 6 }}>{dateLabel(w.published_at)} {'\u00B7'} {readMinutes(w.content)} min read</div>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginTop: 6 }}>{dateLabel(w.published_at)} {'\u00B7'} {readMinutes(plainText(w.content))} min read</div>
             </div>
           ))}
         </div>}
