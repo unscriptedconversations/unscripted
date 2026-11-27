@@ -144,6 +144,10 @@ export default function ProfilePage() {
   useEffect(() => {
     if (router.query.tab === 'account' && currentUser?.id && currentUser.id === id) setTab('account')
   }, [router.query.tab, currentUser?.id, id])
+  // ?tab=writing (e.g. from the writing editor) opens the Writing tab; drafts show only to the owner
+  useEffect(() => {
+    if (router.query.tab === 'writing' && id) setTab('writing')
+  }, [router.query.tab, id])
   useEffect(() => { if (currentUser && id) checkFollowing() }, [currentUser, id])
 
   async function load() {
