@@ -12,6 +12,7 @@ import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
 import TopNav from '../components/TopNav'
+import { renderRich, plainText } from '../lib/formatText'
 
 const REFLECTION_MAX = 300
 const AUTOSAVE_MS = 2500
@@ -58,6 +59,7 @@ export default function Write() {
   const [savedAt, setSavedAt] = useState(null)
   const [saveError, setSaveError] = useState('')
   const [publishOpen, setPublishOpen] = useState(false)
+  const [preview, setPreview] = useState(false)          // show the body formatted, as readers will see it
   const [publishing, setPublishing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -159,6 +161,57 @@ export default function Write() {
     setLoaded(true)
   }
 
+  // Formatting toolbar. Wraps the selection in markers (bold, italic, link) or
+  // prefixes the selected lines (heading, quote). Same markers lib/formatText reads.
+  function applyBody(next, selStart, selEnd) {
+    setContent(next); setDirty(true)
+    requestAnimationFrame(() => { const el = bodyRef.current; if (el) { el.focus(); el.setSelectionRange(selStart, selEnd) } })
+  }
+  function wrap(before, after, placeholder) {
+    const el = bodyRef.current
+    if (!el) return
+    const a = el.selectionStart, b = el.selectionEnd
+    const sel = content.slice(a, b) || placeholder
+    const next = content.slice(0, a) + before + sel + after + content.slice(b)
+    applyBody(next, a + before.length, a + before.length + sel.length)
+  }
+  function prefixLines(prefix) {
+    const el = bodyRef.current
+    if (!el) return
+    const a = content.lastIndexOf('\n', el.selectionStart - 1) + 1
+    let b = content.indexOf('\n', el.selectionEnd)
+    if (b === -1) b = content.length
+    const lines = content.slice(a, b).split('\n')
+    const allHave = lines.every(l => l.startsWith(prefix))
+    const changed = lines.map(l => allHave ? l.slice(prefix.length) : prefix + l.replace(/^(#{1,3} |> )/, '')).join('\n')
+    applyBody(content.slice(0, a) + changed + content.slice(b), a, a + changed.length)
+  }
+  function addLink() {
+    const el = bodyRef.current
+    if (!el) return
+    const a = el.selectionStart, b = el.selectionEnd
+    const label = content.slice(a, b) || 'link text'
+    const insert = `[${label}](https://)`
+    const urlStart = a + label.length + 3
+    applyBody(content.slice(0, a) + insert + content.slice(b), urlStart, urlStart + 8)
+  }
+  function addBreak() {
+    const el = bodyRef.current
+    if (!el) return
+    const a = el.selectionEnd
+    const before = content.slice(0, a).replace(/\s*$/, '')
+    const insert = (before ? '\n\n' : '') + '---\n\n'
+    const next = before + insert + content.slice(a).replace(/^\s*/, '')
+    applyBody(next, before.length + insert.length, before.length + insert.length)
+  }
+  function onBodyKey(e) {
+    if (!(e.metaKey || e.ctrlKey)) return
+    const k = e.key.toLowerCase()
+    if (k === 'b') { e.preventDefault(); wrap('**', '**', 'bold text') }
+    else if (k === 'i') { e.preventDefault(); wrap('*', '*', 'italic text') }
+    else if (k === 'k') { e.preventDefault(); addLink() }
+  }
+
   function edit(setter) { return e => { setter(e.target.value); setDirty(true); if (status === 'error') setStatus('idle') } }
 
   // Save the piece. publish=false keeps it a draft (or moves a published piece
@@ -256,7 +309,7 @@ export default function Write() {
     window.scrollTo(0, 0)
   }
 
-  const wordCount = words(content)
+  const wordCount = words(plainText(content))
   const minutes = Math.max(1, Math.round(wordCount / WORDS_PER_MIN))
   const overLimit = format === 'reflection' && wordCount > REFLECTION_MAX
   const canPublish = !!title.trim() && !!content.trim() && !overLimit
@@ -315,7 +368,8 @@ export default function Write() {
   else if (savedAt) statusText = `${isPublished ? 'Published' : 'Saved'} · ${timeLabel(savedAt)}`
   else if (!writingId) statusText = 'New draft'
 
-  const excerpt = content.trim().replace(/\s+/g, ' ').slice(0, 160) + (content.trim().length > 160 ? '…' : '')
+  const plain = plainText(content).trim().replace(/\s+/g, ' ')
+  const excerpt = plain.slice(0, 160) + (plain.length > 160 ? '\u2026' : '')
 
   return (
     <div style={{ minHeight: '100vh' }}>
@@ -332,6 +386,23 @@ export default function Write() {
           <button style={{ ...btn, background: 'var(--tc)', opacity: canPublish ? 1 : 0.4 }} disabled={!canPublish || status === 'saving'}
             onClick={() => isPublished ? persist(true) : setPublishOpen(true)}>{isPublished ? 'Update' : 'Publish'}</button>
         </div>
+        <div role="toolbar" aria-label="Formatting" style={{ maxWidth: 720, margin: '0 auto', padding: '0 28px 10px', display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+          {[
+            ['B', 'Bold (Ctrl/\u2318 B)', () => wrap('**', '**', 'bold text'), { fontWeight: 800 }],
+            ['I', 'Italic (Ctrl/\u2318 I)', () => wrap('*', '*', 'italic text'), { fontStyle: 'italic', fontFamily: 'var(--hd)', fontSize: 16 }],
+            ['H', 'Heading', () => prefixLines('## '), { fontWeight: 700 }],
+            ['\u201C', 'Quote', () => prefixLines('> '), { fontFamily: 'var(--hd)', fontSize: 20, lineHeight: '14px' }],
+            ['Link', 'Link (Ctrl/\u2318 K)', addLink, { textDecoration: 'underline', fontSize: 12 }],
+            ['\u2022\u2022\u2022', 'Section break', addBreak, { letterSpacing: 1, fontSize: 11 }],
+          ].map(([label, tip, fn, st]) => (
+            <button key={tip} type="button" title={tip} aria-label={tip} disabled={preview} onMouseDown={e => e.preventDefault()} onClick={fn}
+              style={{ minWidth: 34, height: 30, padding: '0 8px', fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--ink)', background: 'none', border: '1px solid transparent', borderRadius: 6, cursor: preview ? 'default' : 'pointer', opacity: preview ? 0.35 : 1, ...st }}>{label}</button>
+          ))}
+          <button type="button" onClick={() => setPreview(p => !p)} aria-pressed={preview}
+            style={{ marginLeft: 'auto', fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: preview ? '#FFF' : 'var(--ink)', background: preview ? 'var(--ink)' : 'none', border: '1.5px solid var(--bd2)', borderRadius: 100, padding: '6px 14px', cursor: 'pointer' }}>
+            {preview ? 'Back to editing' : 'Preview'}
+          </button>
+        </div>
       </div>
 
       {/* Canvas */}
@@ -347,8 +418,17 @@ export default function Write() {
         <AutoGrow ariaLabel="Subtitle" placeholder="Add a subtitle (optional)" value={subtitle} onChange={edit(setSubtitle)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); bodyRef.current?.focus() } }}
           style={{ fontFamily: 'var(--hd)', fontSize: 22, fontStyle: 'italic', lineHeight: 1.35, color: 'var(--txD)', marginBottom: 28 }} />
-        <AutoGrow ariaLabel="Body" inputRef={bodyRef} placeholder="Tell your story…" value={content} onChange={edit(setContent)}
-          style={{ fontFamily: 'var(--hd)', fontSize: 21, lineHeight: 1.75, color: 'var(--ink)', minHeight: 320 }} />
+        {preview ? (
+          <div style={{ fontFamily: 'var(--hd)', fontSize: 21, lineHeight: 1.8, color: 'var(--ink)', minHeight: 320 }}>
+            {content.trim() ? renderRich(content) : <div style={{ color: 'var(--txD)', fontStyle: 'italic' }}>Nothing to preview yet.</div>}
+          </div>
+        ) : (
+          <AutoGrow ariaLabel="Body" inputRef={bodyRef} placeholder="Tell your story…" value={content} onChange={edit(setContent)} onKeyDown={onBodyKey}
+            style={{ fontFamily: 'var(--hd)', fontSize: 21, lineHeight: 1.75, color: 'var(--ink)', minHeight: 320 }} />
+        )}
+        {!preview && wordCount === 0 && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', marginTop: 12, lineHeight: 1.6 }}>
+          Tip: **bold**, *italic*, ## for a heading, &gt; for a quote, or use the toolbar above.
+        </div>}
 
         <div style={{ ...meta, display: 'flex', gap: 14, justifyContent: 'flex-end', marginTop: 28, flexWrap: 'wrap' }}>
           {overLimit && <span style={{ color: '#A0603E', marginRight: 'auto' }}>Over the {REFLECTION_MAX}-word Reflection limit. Trim it, or publish as an Essay.</span>}
