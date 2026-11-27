@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
+import { plainText } from '../lib/formatText'
 import TopNav from '../components/TopNav'
 
 function initialsFor(m) {
@@ -100,7 +101,8 @@ export default function WritingFeed() {
           )}
 
           {!loading && !(following && !currentUser) && visible.map(w => {
-            const preview = (w.content || '').length > 200 ? w.content.slice(0, 200) + '…' : w.content
+            const plain = plainText(w.content).replace(/\s+/g, ' ').trim()
+            const preview = plain.length > 200 ? plain.slice(0, 200) + '\u2026' : plain
             return (
               <div key={w.id} style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '22px 26px', marginBottom: 14, cursor: 'pointer' }} onClick={() => router.push(`/writing/${w.id}`)}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
@@ -112,6 +114,7 @@ export default function WritingFeed() {
                   <span style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginLeft: 'auto' }}>{timeAgo(w.published_at || w.created_at)}</span>
                 </div>
                 <div style={{ fontFamily: 'var(--hd)', fontSize: 22, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)', marginBottom: 8, lineHeight: 1.2 }}>{w.title}</div>
+                {w.subtitle && <div style={{ fontFamily: 'var(--hd)', fontSize: 16, fontStyle: 'italic', color: 'var(--txD)', marginTop: -4, marginBottom: 8 }}>{w.subtitle}</div>}
                 <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', lineHeight: 1.65 }}>{preview}</div>
               </div>
             )
