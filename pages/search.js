@@ -42,6 +42,30 @@ const SectionLabel = ({ children }) => (
   <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', margin: '28px 0 12px' }}>{children}</div>
 )
 
+// Loose title match for older saved books that have no Open Library ID:
+// lowercase, no accents or punctuation, single spaces.
+function normTitle(t) {
+  return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+// Open Library is the source of truth for books. Each catalog result gets the
+// discoverable clubs reading it, matched by book_key (Open Library work ID), or
+// by title for older saves without one. Saved books that match nothing (e.g.
+// manual adds not on Open Library) come back separately as siteOnly.
+function mergeBooks(ol, saved) {
+  const used = new Set()
+  const merged = ol.map(o => {
+    const titles = new Set([normTitle(o.title), normTitle(o.original_title)])
+    const mine = saved.filter(b => (b.book_key && b.book_key === o.key) || (!b.book_key && titles.has(normTitle(b.title))))
+    mine.forEach(b => used.add(b.id))
+    const clubs = []
+    for (const b of mine) if (b.club && !clubs.some(c => c.id === b.club_id)) clubs.push({ id: b.club_id, name: b.club.name })
+    return { ...o, clubs, savedIds: mine.map(b => b.id) }
+  })
+  return { merged, siteOnly: saved.filter(b => !used.has(b.id)) }
+}
+
 export default function SearchPage() {
   const router = useRouter()
   const [q, setQ] = useState('')
@@ -53,6 +77,7 @@ export default function SearchPage() {
   const [ranTerm, setRanTerm] = useState('')   // the term the current results are for
   const [bridges, setBridges] = useState([])
   const [olBooks, setOlBooks] = useState([])
+  const [siteOnly, setSiteOnly] = useState([]) // saved books with no Open Library match
   const [tab, setTab] = useState('all')
   const [loading, setLoading] = useState(false)
   const [olLoading, setOlLoading] = useState(false)
@@ -114,7 +139,7 @@ export default function SearchPage() {
     // Hidden clubs (discoverable = false), and books in them, never appear in search.
     const [cR, bR, mR, wR, aR, brR] = await Promise.all([
       supabase.from('clubs').select('id, name, description, privacy, tagline, tags').eq('discoverable', true).or(`name.ilike.${like},description.ilike.${like},tagline.ilike.${like},tags.cs.{${term}}`).limit(20),
-      supabase.from('books').select('id, title, author, tags, club_id, club:clubs!inner(name, discoverable)').eq('club.discoverable', true).or(booksOr).limit(20),
+      supabase.from('books').select('id, title, author, tags, book_key, club_id, club:clubs!inner(name, discoverable)').eq('club.discoverable', true).or(booksOr).limit(20),
       supabase.from('magazines').select('id, title, publisher, description, tags, cover_url, website, founded').or(`title.ilike.${like},publisher.ilike.${like},description.ilike.${like},tags.cs.{${term}}`).limit(20),
       supabase.from('writings').select('id, title, content, format, published_at, member_id, tags, author:members(id, first_name, last_name, initials, color)').eq('is_published', true).or(`title.ilike.${like},content.ilike.${like},tags.cs.{${term}}`).limit(20),
       supabase.from('members').select('id, first_name, last_name, initials, color').or('status.is.null,status.neq.disabled').or(`first_name.ilike.${like},last_name.ilike.${like}`).limit(12),
@@ -135,6 +160,7 @@ export default function SearchPage() {
     setClubs([...(cR.data || []), ...extra])
     setRanTerm(term)
     setBooks(bR.data || [])
+    setSiteOnly([])
     setMagazines(mR.data || [])
     setWritings(wR.data || [])
     setAuthors(aR.data || [])
@@ -160,8 +186,27 @@ export default function SearchPage() {
     // Wider catalog (Open Library) via shared lib — cache is warmed across the
     // homepage and /search. Submit-driven, so no debounce/sequence guard needed.
     setOlLoading(true)
-    const ol = await olSearch(term, { excludeTitles: (bR.data || []).map(b => b.title) })
-    setOlBooks(ol)
+    const ol = await olSearch(term)
+    // Saved copies of these exact books (by Open Library ID), whatever title they were saved under
+    let saved = [...bookHits]
+    const keys = ol.map(o => o.key).filter(Boolean)
+    if (keys.length) {
+      const { data: byKey } = await supabase.from('books')
+        .select('id, title, author, tags, book_key, club_id, club:clubs!inner(name, discoverable)')
+        .eq('club.discoverable', true).in('book_key', keys).limit(60)
+      for (const b of (byKey || [])) if (!saved.some(x => x.id === b.id)) saved.push(b)
+    }
+    const { merged, siteOnly: rest } = mergeBooks(ol, saved)
+    setOlBooks(merged)
+    setSiteOnly(rest)
+    // "Reading …" on club results uses the catalog title, not the saved copy's
+    const titleById = {}
+    merged.forEach(o => o.savedIds.forEach(sid => { titleById[sid] = o.title }))
+    setClubs(cs => cs.map(c => {
+      if (!c.reading) return c
+      const b = saved.find(x => x.club_id === c.id && titleById[x.id])
+      return b ? { ...c, reading: titleById[b.id] } : c
+    }))
     setOlLoading(false)
 
     // Log for trending. Counts only if the search found something other than
@@ -281,12 +326,30 @@ export default function SearchPage() {
             ))}
           </div>}
 
-          {/* BOOKS ON UNSCRIPTED */}
-          {show('books') && books.length > 0 && <div>
-            <SectionLabel>Books on unscripted</SectionLabel>
-            {books.map(b => (
+          {/* BOOKS: Open Library results, with clubs reading each */}
+          {show('books') && (olLoading || olBooks.length > 0) && <div>
+            <SectionLabel>Books</SectionLabel>
+            {olLoading && olBooks.length === 0 && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', padding: '4px 4px 12px' }}>Searching books…</div>}
+            {olBooks.map(b => (
+              <div key={b.key} style={rowStyle} onClick={() => router.push(`/book/${b.key}`)}>
+                {b.cover
+                  ? <img src={`https://covers.openlibrary.org/b/id/${b.cover}-S.jpg`} alt="" style={{ width: 30, height: 46, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }} />
+                  : <span style={{ fontSize: 22, width: 30, textAlign: 'center' }}>📖</span>}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</div>
+                  <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}><AuthorLinks author={b.author} router={router} />{b.year ? ` · ${b.year}` : ''}</div>
+                  {b.clubs.length > 0 && <div style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, color: 'var(--tc)', marginTop: 3 }}>Reading in {b.clubs[0].name}{b.clubs.length > 1 ? ` + ${b.clubs.length - 1} more` : ''}</div>}
+                </div>
+              </div>
+            ))}
+          </div>}
+
+          {/* Saved books Open Library doesn't know (e.g. added by hand) */}
+          {show('books') && !olLoading && siteOnly.length > 0 && <div>
+            <SectionLabel>Added by clubs</SectionLabel>
+            {siteOnly.map(b => (
               <div key={b.id} style={rowStyle} onClick={() => router.push(`/book/${b.id}`)}>
-                <span style={{ fontSize: 22 }}>📖</span>
+                <span style={{ fontSize: 22, width: 30, textAlign: 'center' }}>📖</span>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</div>
                   <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}><AuthorLinks author={b.author} router={router} />{b.club ? ` · ${b.club.name}` : ''}</div>
@@ -367,24 +430,6 @@ export default function SearchPage() {
                   <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: t.kind === 'book' ? 'italic' : 'normal', color: 'var(--ink)' }}>{t.title}</div>
                   <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginTop: 2 }}>{[t.clubs > 0 && `${t.clubs} club${t.clubs !== 1 ? 's' : ''}`, `${t.readers} reader${t.readers !== 1 ? 's' : ''}`, `${t.postCount} post${t.postCount !== 1 ? 's' : ''}`].filter(Boolean).join(' · ')}</div>
                 </div>
-              </div>
-            ))}
-          </div>}
-
-          {/* WIDER CATALOG */}
-          {show('books') && (olLoading || olBooks.length > 0) && <div>
-            <SectionLabel>All books</SectionLabel>
-            {olLoading && olBooks.length === 0 && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', padding: '4px 4px 12px' }}>Searching the wider catalog…</div>}
-            {olBooks.map(b => (
-              <div key={b.key} style={rowStyle} onClick={() => router.push(`/book/${b.key}`)}>
-                {b.cover
-                  ? <img src={`https://covers.openlibrary.org/b/id/${b.cover}-S.jpg`} alt="" style={{ width: 30, height: 46, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }} />
-                  : <span style={{ fontSize: 22, width: 30, textAlign: 'center' }}>📖</span>}
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</div>
-                  <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}><AuthorLinks author={b.author} router={router} />{b.year ? ` · ${b.year}` : ''}</div>
-                </div>
-                <span style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--txD)', flexShrink: 0 }}>Not on unscripted</span>
               </div>
             ))}
           </div>}
