@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
+import TopNav from '../components/TopNav'
 
 const REFLECTION_MAX = 300
 const FORMATS = [
@@ -28,6 +29,8 @@ export default function Write() {
   const [deleting, setDeleting] = useState(false)
   const [suggesting, setSuggesting] = useState(false)
   const [suggestNote, setSuggestNote] = useState('')
+  const [draftCount, setDraftCount] = useState(0)
+  const [justPublished, setJustPublished] = useState(null) // { id, title, club } after Publish
   // Only offer "Suggest themes" when AI is on. /api/themes answers an empty
   // request with { disabled: true } when ANTHROPIC_API_KEY is unset; it checks
   // the key before anything else, so this probe never calls the model.
@@ -43,7 +46,7 @@ export default function Write() {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
         const { data: u } = await supabase.from('members').select('*').eq('id', session.user.id).single()
-        if (u) { setCurrentUser(u); loadMyClubs(u.id) }
+        if (u) { setCurrentUser(u); loadMyClubs(u.id); loadDraftCount(u.id) }
       }
       setAuthChecked(true)
     })
@@ -58,6 +61,19 @@ export default function Write() {
     const about = Array.isArray(router.query.about) ? router.query.about[0] : router.query.about
     if (about) setTagsInput(prev => prev || String(about))
   }, [router.isReady])
+
+  async function loadDraftCount(memberId) {
+    const { count } = await supabase.from('writings').select('id', { count: 'exact', head: true }).eq('member_id', memberId).eq('is_published', false)
+    setDraftCount(count || 0)
+  }
+
+  // Start a fresh piece in place (after publishing)
+  function writeAnother() {
+    setJustPublished(null); setWritingId(null); setIsPublished(false)
+    setTitle(''); setContent(''); setTagsInput(''); setClubId(''); setFormat('reflection'); setSuggestNote('')
+    router.replace('/write', undefined, { shallow: true })
+    window.scrollTo(0, 0)
+  }
 
   async function loadMyClubs(memberId) {
     const { data } = await supabase.from('club_members').select('club:clubs(id, name)').eq('member_id', memberId)
@@ -130,9 +146,15 @@ export default function Write() {
     }
     setIsPublished(publish)
     setSaving(false)
+    loadDraftCount(currentUser.id)
+    if (publish && savedId) {
+      // Show where to go next instead of dropping the writer on the piece
+      setJustPublished({ id: savedId, title: title.trim(), club: myClubs.find(c => c.id === clubId) || null })
+      window.scrollTo(0, 0)
+      return
+    }
     setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-    if (publish && savedId) router.push(`/writing/${savedId}`)
+    setTimeout(() => setSaved(false), 6000)
   }
 
   const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0
@@ -159,12 +181,37 @@ export default function Write() {
     </div>
   )
 
+  const nextBtn = { ...btnO, padding: '12px 20px', fontSize: 11 }
+
+  if (justPublished) return (
+    <div style={{ minHeight: '100vh' }}>
+      <title>Published — unscripted</title>
+      <TopNav />
+      <div style={{ maxWidth: 560, margin: '0 auto', padding: '64px 28px 80px', textAlign: 'center' }}>
+        <div style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: 'var(--sg)', marginBottom: 14 }}>Published {'\u2713'}</div>
+        <div style={{ fontFamily: 'var(--hd)', fontSize: 30, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)', lineHeight: 1.25, marginBottom: 12 }}>{justPublished.title}</div>
+        <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', lineHeight: 1.6, marginBottom: 32 }}>
+          {justPublished.club ? <>It{'\u2019'}s on your profile and shared with {justPublished.club.name}.</> : <>It{'\u2019'}s live on your profile.</>}
+        </div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <button style={{ ...btn, padding: '13px 22px', fontSize: 11 }} onClick={() => router.push(`/writing/${justPublished.id}`)}>View piece</button>
+          <button style={nextBtn} onClick={() => router.push(`/profile/${currentUser.id}?tab=writing`)}>Go to your profile</button>
+          {justPublished.club && <button style={nextBtn} onClick={() => router.push(`/club/${justPublished.club.id}`)}>Back to {justPublished.club.name}</button>}
+        </div>
+        <button onClick={writeAnother} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--tc)', background: 'none', border: 'none', cursor: 'pointer', marginTop: 24 }}>Write another piece</button>
+      </div>
+    </div>
+  )
+
   return (
     <div style={{ minHeight: '100vh' }}>
       <title>{writingId ? 'Edit' : 'Write'} — unscripted</title>
+      <TopNav />
       <div style={{ maxWidth: 680, margin: '0 auto', padding: '0 28px 80px' }}>
-        <div style={{ padding: '32px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ cursor: 'pointer' }} onClick={() => router.push('/')}><Logo /></div>
+        <div style={{ padding: '20px 0 32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <button onClick={() => router.push(`/profile/${currentUser.id}?tab=writing`)} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--tc)', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+            {'\u2190'} Your writing{draftCount > 0 ? ` \u00B7 ${draftCount} ${draftCount === 1 ? 'draft' : 'drafts'}` : ''}
+          </button>
           {isPublished && <span style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--sg)', background: 'rgba(94,122,98,0.1)', borderRadius: 100, padding: '6px 14px' }}>Published</span>}
         </div>
 
@@ -217,7 +264,9 @@ export default function Write() {
           <button style={btnO} disabled={saving} onClick={() => save(false)}>Save draft</button>
           <button style={{ ...btn, flex: 1, opacity: (title.trim() && content.trim() && !overLimit) ? 1 : 0.4 }} disabled={saving || !title.trim() || !content.trim() || overLimit} onClick={() => save(true)}>Publish</button>
         </div>
-        {saved && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--sg)', marginTop: 12, textAlign: 'center' }}>Saved</div>}
+        {saved && <div role="status" style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--sg)', marginTop: 12, textAlign: 'center' }}>
+          {isPublished ? 'Saved' : <>Saved to your drafts {'\u00B7'} <span style={{ color: 'var(--tc)', fontWeight: 600, cursor: 'pointer' }} onClick={() => router.push(`/profile/${currentUser.id}?tab=writing`)}>View your drafts</span></>}
+        </div>}
 
         {/* Delete (existing pieces only). remove_content() in SQL checks you're the author. */}
         {writingId && <div style={{ marginTop: 40, paddingTop: 20, borderTop: '1px solid var(--bd)', textAlign: 'center' }}>
