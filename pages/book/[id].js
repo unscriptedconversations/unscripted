@@ -4,6 +4,10 @@ import { supabase } from '../../lib/supabase'
 import TopNav from '../../components/TopNav'
 import { BRIDGE_ENABLED } from '../../lib/flags'
 
+// Open Library fields incl. the best-matching English edition (lang=en), so
+// translated books show their English title and cover, not the original's.
+const OL_FIELDS = 'title,author_name,cover_i,subject,first_publish_year,editions,editions.title,editions.cover_i'
+
 export default function BookPage() {
   const router = useRouter()
   const { id } = router.query
@@ -54,48 +58,72 @@ export default function BookPage() {
   const isOLKey = typeof id === 'string' && /^OL\d+W$/i.test(id)
 
   async function loadBook() {
-    if (isOLKey) return loadOpenLibraryBook()
+    if (isOLKey) return loadOpenLibraryBook(id)
     const { data: b } = await supabase.from('books').select('*').eq('id', id).single()
     if (!b) { setNotFound(true); return }
+    // Saved with an Open Library ID: show the catalog's (English) details
+    if (b.book_key) return loadOpenLibraryBook(b.book_key, b)
     setBook(b)
-    setBookKey(b.book_key)
-    await loadClubsFor(b.title)
+    setBookKey(null)
+    await loadClubsFor(null, [b.title])
     fetchCover(b.title, b.author)
   }
 
-  // A book that isn't on unscripted yet — details come from Open Library,
-  // then we still look for any clubs reading it by title.
-  async function loadOpenLibraryBook() {
+  // Details come from Open Library (English edition when there is one).
+  // `saved` is our own row when the page was opened by its id.
+  async function loadOpenLibraryBook(key, saved = null) {
     try {
-      const r = await fetch(`https://openlibrary.org/search.json?q=key:/works/${id}&limit=1&fields=title,author_name,cover_i,subject,first_publish_year`)
+      const r = await fetch(`https://openlibrary.org/search.json?q=key:/works/${encodeURIComponent(key)}&lang=en&limit=1&fields=${OL_FIELDS}`)
       const d = await r.json()
       const doc = d.docs?.[0]
-      if (!doc) { setNotFound(true); return }
+      if (!doc) {
+        if (saved) { setBook(saved); setBookKey(key); await loadClubsFor(key, [saved.title]); fetchCover(saved.title, saved.author); return }
+        setNotFound(true); return
+      }
+      const ed = doc.editions?.docs?.[0]
+      const title = ed?.title || doc.title
       const b = {
-        id,
-        title: doc.title,
-        author: (doc.author_name || []).join(', '),
-        tags: (doc.subject || []).slice(0, 5),
+        ...(saved || {}),
+        id: saved ? saved.id : key,
+        title,
+        author: (doc.author_name || []).join(', ') || saved?.author || '',
+        tags: saved?.tags?.length ? saved.tags : (doc.subject || []).slice(0, 5),
         first_year: doc.first_publish_year,
-        external: true,
+        external: !saved,
       }
       setBook(b)
-      setBookKey(id)
-      if (doc.cover_i) setCoverUrl(`https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`)
-      else fetchCover(b.title, b.author)
-      await loadClubsFor(doc.title)
-    } catch { setNotFound(true) }
+      setBookKey(key)
+      const coverId = ed ? ed.cover_i : doc.cover_i
+      if (coverId) setCoverUrl(`https://covers.openlibrary.org/b/id/${coverId}-L.jpg`)
+      else fetchCover(title, b.author)
+      // Older saves may lack the ID or use the original-language title
+      await loadClubsFor(key, [title, doc.title, saved?.title].filter(Boolean))
+    } catch {
+      if (saved) { setBook(saved); setBookKey(key); await loadClubsFor(key, [saved.title]); return }
+      setNotFound(true)
+    }
   }
 
-  // Clubs reading a given title (shared by both paths)
-  async function loadClubsFor(title) {
-    const { data: allBooks } = await supabase.from('books').select('*, club:clubs(*)').eq('title', title)
-    const rows = allBooks || []
-    setClubs(rows.map(ab => ab.club).filter(Boolean))
+  // Clubs reading this book: saved copies with this Open Library ID, plus older
+  // saves without an ID whose title matches. Hidden clubs aren't shown.
+  async function loadClubsFor(key, titles) {
+    const byId = new Map()
+    if (key) {
+      const { data } = await supabase.from('books').select('*, club:clubs(*)').eq('book_key', key)
+      for (const r of (data || [])) byId.set(r.id, r)
+    }
+    const uniq = [...new Set(titles.filter(Boolean))]
+    if (uniq.length) {
+      const { data } = await supabase.from('books').select('*, club:clubs(*)').in('title', uniq)
+      for (const r of (data || [])) if (!r.book_key || r.book_key === key) byId.set(r.id, r)
+    }
+    const rows = [...byId.values()].filter(r => r.club && r.club.discoverable !== false)
+    const seen = new Set()
+    setClubs(rows.map(r => r.club).filter(c => !seen.has(c.id) && seen.add(c.id)))
 
     const bookIds = rows.map(r => r.id)
-    const clubIds = rows.map(r => r.club_id).filter(Boolean)
-
+    const clubIds = [...new Set(rows.map(r => r.club_id).filter(Boolean))]
+    setThreadCount(0); setMemberCount(0)
     if (bookIds.length) {
       const { count } = await supabase.from('threads').select('id', { count: 'exact', head: true }).in('book_id', bookIds)
       setThreadCount(count || 0)
@@ -109,10 +137,11 @@ export default function BookPage() {
   // Pull cover art live from Open Library (books table doesn't store one)
   async function fetchCover(title, author) {
     try {
-      const q = `https://openlibrary.org/search.json?title=${encodeURIComponent(title)}${author ? `&author=${encodeURIComponent(author)}` : ''}&limit=1&fields=cover_i`
+      const q = `https://openlibrary.org/search.json?title=${encodeURIComponent(title)}${author ? `&author=${encodeURIComponent(author)}` : ''}&lang=en&limit=1&fields=cover_i,editions,editions.cover_i`
       const r = await fetch(q)
       const d = await r.json()
-      const ci = d.docs?.[0]?.cover_i
+      const doc = d.docs?.[0]
+      const ci = doc?.editions?.docs?.[0] ? doc.editions.docs[0].cover_i : doc?.cover_i
       if (ci) setCoverUrl(`https://covers.openlibrary.org/b/id/${ci}-L.jpg`)
     } catch { /* no cover — placeholder shown */ }
   }
