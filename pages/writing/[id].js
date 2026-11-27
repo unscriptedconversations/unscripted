@@ -31,6 +31,12 @@ export default function WritingPage() {
   const [notFound, setNotFound] = useState(false)
   const [more, setMore] = useState([])      // other published pieces by this writer
   const [copied, setCopied] = useState(false)
+  const [likeCount, setLikeCount] = useState(0)
+  const [liked, setLiked] = useState(false)
+  const [comments, setComments] = useState([])
+  const [newComment, setNewComment] = useState('')
+  const [posting, setPosting] = useState(false)
+  const [commentError, setCommentError] = useState('')
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -51,6 +57,7 @@ export default function WritingPage() {
     const { data: others } = await supabase.from('writings').select('id, title, subtitle, format, content, published_at')
       .eq('member_id', w.member_id).eq('is_published', true).neq('id', w.id).order('published_at', { ascending: false }).limit(3)
     setMore(others || [])
+    loadResponses(w.id)
     if (w.club_id) {
       const { data: c } = await supabase.from('clubs').select('id, name').eq('id', w.club_id).single()
       if (c) setClub(c)
@@ -60,6 +67,56 @@ export default function WritingPage() {
   useEffect(() => {
     if (currentUser && author) checkFollowing()
   }, [currentUser, author])
+
+  // Has the reader already hearted this piece?
+  useEffect(() => {
+    if (!currentUser || !writing) return
+    supabase.from('writing_likes').select('id').eq('writing_id', writing.id).eq('member_id', currentUser.id).maybeSingle()
+      .then(({ data }) => setLiked(!!data))
+  }, [currentUser, writing])
+
+  async function loadResponses(wid) {
+    const [{ count }, { data: cs }] = await Promise.all([
+      supabase.from('writing_likes').select('id', { count: 'exact', head: true }).eq('writing_id', wid),
+      supabase.from('writing_comments').select('id, body, created_at, member_id, member:members(id, first_name, last_name, initials, color)').eq('writing_id', wid).order('created_at'),
+    ])
+    setLikeCount(count || 0)
+    setComments(cs || [])
+  }
+
+  async function toggleLike() {
+    if (!currentUser) { router.push('/login?redirect=/writing/' + id); return }
+    const was = liked
+    setLiked(!was); setLikeCount(n => Math.max(0, n + (was ? -1 : 1)))
+    const { error } = was
+      ? await supabase.from('writing_likes').delete().eq('writing_id', writing.id).eq('member_id', currentUser.id)
+      : await supabase.from('writing_likes').insert({ writing_id: writing.id, member_id: currentUser.id })
+    if (error && error.code !== '23505') { setLiked(was); setLikeCount(n => Math.max(0, n + (was ? 1 : -1))) }
+  }
+
+  async function postComment() {
+    const body = newComment.trim()
+    if (!currentUser) { router.push('/login?redirect=/writing/' + id); return }
+    if (!body) return
+    if (body.length > 2000) { setCommentError('Comments can be up to 2,000 characters.'); return }
+    setPosting(true); setCommentError('')
+    const { data, error } = await supabase.from('writing_comments').insert({ writing_id: writing.id, member_id: currentUser.id, body })
+      .select('id, body, created_at, member_id').single()
+    setPosting(false)
+    if (error || !data) { setCommentError('Sorry, your comment couldn\u2019t be posted. Please try again.' + (error?.code ? ` (Error code: ${error.code})` : '')); return }
+    setComments(cs => [...cs, { ...data, member: currentUser }])
+    setNewComment('')
+    if (currentUser.id !== writing.member_id) {
+      createNotification({ recipientId: writing.member_id, actorId: currentUser.id, type: 'reply', link: `/writing/${writing.id}#comments`, preview: body.slice(0, 80) })
+    }
+  }
+
+  async function deleteComment(cid) {
+    if (!window.confirm('Delete this comment?')) return
+    const { error } = await supabase.from('writing_comments').delete().eq('id', cid)
+    if (error) { window.alert('Sorry, that comment couldn\u2019t be deleted.'); return }
+    setComments(cs => cs.filter(c => c.id !== cid))
+  }
 
   async function checkFollowing() {
     const { data } = await supabase.from('writing_follows').select('id').eq('follower_member_id', currentUser.id).eq('writer_member_id', author.id).maybeSingle()
@@ -133,6 +190,17 @@ export default function WritingPage() {
           {writing.tags.map(t => <span key={t} onClick={() => router.push(`/search?q=${encodeURIComponent(t)}`)} style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, color: 'var(--sg)', background: 'rgba(94,122,98,0.1)', borderRadius: 100, padding: '5px 12px', cursor: 'pointer' }}>{t}</span>)}
         </div>}
 
+        {/* Responses */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginTop: 36 }}>
+          <button onClick={toggleLike} aria-pressed={liked} aria-label={liked ? 'Remove heart' : 'Heart this piece'}
+            style={{ display: 'flex', alignItems: 'center', gap: 7, fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 600, color: liked ? 'var(--tc)' : 'var(--txD)', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+            <span style={{ fontSize: 20, lineHeight: 1 }}>{liked ? '\u2665' : '\u2661'}</span>{likeCount}
+          </button>
+          <a href="#comments" style={{ display: 'flex', alignItems: 'center', gap: 7, fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 600, color: 'var(--txD)', textDecoration: 'none' }}>
+            <span style={{ fontSize: 17, lineHeight: 1 }}>{'\u{1F4AC}'}</span>{comments.length}
+          </a>
+        </div>
+
         {/* End of piece: the writer, then more of their work */}
         {author && <div style={{ marginTop: 56, padding: '28px 0', borderTop: '1px solid var(--bd)', display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{ cursor: 'pointer' }} onClick={() => router.push(`/profile/${author.id}`)}><MemberAvatar member={author} size={52} /></div>
@@ -144,7 +212,43 @@ export default function WritingPage() {
           <button style={smallBtn} onClick={share}>{copied ? 'Link copied' : 'Share'}</button>
         </div>}
 
-        {more.length > 0 && <div style={{ marginTop: 12 }}>
+        <section id="comments" style={{ marginTop: 20, paddingTop: 28, borderTop: '1px solid var(--bd)', scrollMarginTop: 80 }}>
+          <div style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 16 }}>
+            {comments.length ? `${comments.length} ${comments.length === 1 ? 'comment' : 'comments'}` : 'Comments'}
+          </div>
+          {comments.map(c => (
+            <div key={c.id} style={{ display: 'flex', gap: 12, padding: '14px 0', borderBottom: '1px solid var(--bd)' }}>
+              <div style={{ cursor: 'pointer' }} onClick={() => c.member && router.push(`/profile/${c.member.id}`)}><MemberAvatar member={c.member} size={32} /></div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', marginBottom: 4 }}>
+                  <span style={{ fontWeight: 700, color: 'var(--ink)', cursor: 'pointer' }} onClick={() => c.member && router.push(`/profile/${c.member.id}`)}>{c.member ? `${c.member.first_name} ${c.member.last_name}` : 'A reader'}</span>
+                  {c.member_id === writing.member_id && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--tc)' }}>Writer</span>}
+                  {' \u00B7 '}{dateLabel(c.created_at)}
+                  {currentUser && (currentUser.id === c.member_id || isOwner) && <button onClick={() => deleteComment(c.id)} style={{ marginLeft: 10, fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textDecoration: 'underline' }}>Delete</button>}
+                </div>
+                <div style={{ fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--ink)', lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{c.body}</div>
+              </div>
+            </div>
+          ))}
+          {currentUser ? (
+            <div style={{ marginTop: 16 }}>
+              <textarea value={newComment} maxLength={2000} rows={3} placeholder={isOwner ? 'Reply to your readers\u2026' : 'Share what this stirred in you\u2026'} aria-label="Write a comment"
+                onChange={e => { setNewComment(e.target.value); setCommentError('') }}
+                style={{ width: '100%', boxSizing: 'border-box', padding: '12px 14px', background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 12, fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--ink)', outline: 'none', resize: 'vertical', lineHeight: 1.5 }} />
+              {commentError && <div role="alert" style={{ fontFamily: 'var(--ui)', fontSize: 12, color: '#A0603E', marginTop: 6 }}>{commentError}</div>}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                <button disabled={posting || !newComment.trim()} onClick={postComment}
+                  style={{ ...smallBtn, color: '#FFF', background: 'var(--ink)', border: 'none', opacity: posting || !newComment.trim() ? 0.5 : 1 }}>{posting ? 'Posting\u2026' : 'Post comment'}</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', marginTop: 16 }}>
+              <span style={{ color: 'var(--tc)', fontWeight: 600, cursor: 'pointer' }} onClick={() => router.push('/login?redirect=/writing/' + id)}>Log in</span> to leave a comment.
+            </div>
+          )}
+        </section>
+
+        {more.length > 0 && <div style={{ marginTop: 40 }}>
           <div style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 12 }}>More from {author?.first_name || 'this writer'}</div>
           {more.map(w => (
             <div key={w.id} onClick={() => router.push(`/writing/${w.id}`)} style={{ padding: '16px 0', borderTop: '1px solid var(--bd)', cursor: 'pointer' }}>
