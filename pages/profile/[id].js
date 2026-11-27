@@ -9,6 +9,7 @@ import Bookshelf from '../../components/Bookshelf'
 import PinnedPapers from '../../components/PinnedPapers'
 import { createNotification } from '../../lib/notify'
 import { olSearch } from '../../lib/olSearch'
+import { plainText } from '../../lib/formatText'
 
 const COLORS = ['#8B6E52', '#5E7A62', '#C27A5A', '#6B6590', '#52708B', '#7A5278', '#8B7E52', '#8B5E5E', '#8B6E6E']
 
@@ -69,7 +70,8 @@ function Msg({ m }) {
 }
 
 function WritingCard({ w, onClick }) {
-  const preview = w.content.length > 160 ? w.content.slice(0, 160) + '...' : w.content
+  const plain = plainText(w.content).replace(/\s+/g, ' ').trim()
+  const preview = plain.length > 160 ? plain.slice(0, 160) + '\u2026' : plain
   return (
     <div style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '20px 24px', marginBottom: 12, cursor: 'pointer' }} onClick={onClick}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
@@ -78,6 +80,7 @@ function WritingCard({ w, onClick }) {
         <span style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginLeft: 'auto' }}>{timeAgo(w.published_at || w.created_at)}</span>
       </div>
       <div style={{ fontFamily: 'var(--hd)', fontSize: 19, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)', marginBottom: 6 }}>{w.title}</div>
+      {w.subtitle && <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontStyle: 'italic', color: 'var(--txD)', marginTop: -2, marginBottom: 6 }}>{w.subtitle}</div>}
       <div style={{ fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)', lineHeight: 1.6 }}>{preview}</div>
     </div>
   )
