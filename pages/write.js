@@ -93,8 +93,9 @@ export default function Write() {
 
   useEffect(() => {
     if (!router.isReady) return
-    if (id) loadWriting(id)
-    else setLoaded(true)
+    // The address gains ?id= after the first autosave; that piece is already open, so don't reload it
+    if (id && id !== latest.current.writingId) loadWriting(id)
+    else if (!id) setLoaded(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router.isReady, id])
 
