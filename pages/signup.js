@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
-import { normalizeTag } from '../lib/tags'
+import { normalizeTag, normalizeTags } from '../lib/tags'
+import { olSearch } from '../lib/olSearch'
 
 // ── Interest prompt data ────────────────────────────────────────────────────
 const GOALS = [
@@ -112,6 +113,7 @@ export default function Signup() {
   const [clubData, setCD] = useState({
     name: '', desc: '', privacy: 'invite',
     bookTitle: '', bookAuthor: '', bookCh: '', noCh: false,
+    bookKey: null, bookTags: [], // Open Library work ID + subjects of the picked book
   })
 
   // Book search
@@ -140,6 +142,7 @@ export default function Signup() {
         mode: mode || 'individual',
         bookTitle: mode === 'club' ? (clubData.bookTitle || '') : '',
         bookAuthor: mode === 'club' ? (clubData.bookAuthor || '') : '',
+        bookKey: mode === 'club' ? (clubData.bookKey || null) : null,
         at: Date.now(),
       }))
     } catch (e) {}
@@ -174,7 +177,7 @@ export default function Signup() {
         window.localStorage.removeItem(OAUTH_STASH_KEY)
       } catch (e) {}
       if (stash && Date.now() - (stash.at || 0) < OAUTH_STASH_MAX_MS && stash.mode === 'club') {
-        if (stash.bookTitle) setCD(d => ({ ...d, bookTitle: stash.bookTitle, bookAuthor: stash.bookAuthor || '' }))
+        if (stash.bookTitle) setCD(d => ({ ...d, bookTitle: stash.bookTitle, bookAuthor: stash.bookAuthor || '', bookKey: stash.bookKey || null }))
         setMode('club')
       } else {
         setMode('individual')
@@ -196,7 +199,7 @@ export default function Signup() {
       setCU(m)
       setRD(d => ({ ...d, first: m.first_name || '', last: m.last_name || '', email: m.email || session.user.email || '' }))
       if (md.signup_mode === 'club') {
-        if (md.book_title) setCD(d => ({ ...d, bookTitle: md.book_title, bookAuthor: md.book_author || '' }))
+        if (md.book_title) setCD(d => ({ ...d, bookTitle: md.book_title, bookAuthor: md.book_author || '', bookKey: md.book_key || null }))
         setMode('club'); setStep(2)
       } else {
         setMode('individual'); startReaderInterests()
@@ -208,9 +211,10 @@ export default function Signup() {
   // Arriving from a book page ("Start a club for this book") — carry the book through
   useEffect(() => {
     if (!router.isReady || isOAuth) return
-    const { bookTitle, bookAuthor } = router.query
+    const { bookTitle, bookAuthor, bookKey } = router.query
     if (!bookTitle) return
-    setCD(d => ({ ...d, bookTitle: String(bookTitle), bookAuthor: bookAuthor ? String(bookAuthor) : '' }))
+    const key = typeof bookKey === 'string' && /^OL\d+W$/i.test(bookKey) ? bookKey : null
+    setCD(d => ({ ...d, bookTitle: String(bookTitle), bookAuthor: bookAuthor ? String(bookAuthor) : '', bookKey: key }))
     setMode('club')
     setStep(0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -273,13 +277,14 @@ export default function Signup() {
     setBkL(true)
     timer.current = setTimeout(async () => {
       try {
-        const r = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(val)}&limit=5&fields=title,author_name,first_publish_year,cover_i`)
-        const d = await r.json()
-        setBkR((d.docs || []).map(b => ({
+        // Shared Open Library search: English editions, carries the work ID
+        const hits = await olSearch(val)
+        setBkR(hits.slice(0, 6).map(b => ({
           title: b.title,
-          author: (b.author_name || [])[0] || 'Unknown',
-          year: b.first_publish_year,
-          cover: b.cover_i ? `https://covers.openlibrary.org/b/id/${b.cover_i}-S.jpg` : null,
+          author: (b.author || '').split(', ')[0] || 'Unknown',
+          year: b.year,
+          cover: b.cover ? `https://covers.openlibrary.org/b/id/${b.cover}-S.jpg` : null,
+          key: b.key, subjects: b.subjects || [],
         })))
       } catch { setBkR([]) }
       setBkL(false)
@@ -342,7 +347,7 @@ export default function Signup() {
             initials,
             color,
             signup_mode: mode || 'individual',
-            ...(mode === 'club' && clubData.bookTitle ? { book_title: clubData.bookTitle, book_author: clubData.bookAuthor || '' } : {}),
+            ...(mode === 'club' && clubData.bookTitle ? { book_title: clubData.bookTitle, book_author: clubData.bookAuthor || '', book_key: clubData.bookKey || null } : {}),
           },
         },
       })
@@ -434,6 +439,8 @@ export default function Signup() {
         title: clubData.bookTitle, author: clubData.bookAuthor,
         total_chapters: chapters, current_chapter: 0,
         status: 'current', display_order: 1, club_id: club.id,
+        book_key: clubData.bookKey || null, source: 'openlibrary', added_by: memberId,
+        tags: clubData.bookTags || [], tags_norm: normalizeTags(clubData.bookTags || []),
       }).select().single()
 
       if (book && chapters > 0) {
@@ -996,7 +1003,7 @@ export default function Signup() {
                       {bkL && <div style={{ padding: '16px 20px', fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>Searching…</div>}
                       {bkR.map((b, i) => (
                         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
-                          onClick={() => { setCD(d => ({ ...d, bookTitle: b.title, bookAuthor: b.author })); setBkQ(''); setBkR([]) }}>
+                          onClick={() => { setCD(d => ({ ...d, bookTitle: b.title, bookAuthor: b.author, bookKey: b.key || null, bookTags: b.subjects || [] })); setBkQ(''); setBkR([]) }}>
                           {b.cover ? <img src={b.cover} style={{ width: 32, height: 44, borderRadius: 4, objectFit: 'cover' }} alt="" /> : <span style={{ fontSize: 20 }}>📖</span>}
                           <div>
                             <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>{b.title}</div>
