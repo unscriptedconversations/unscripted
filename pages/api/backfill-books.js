@@ -1,155 +1,198 @@
-// pages/api/backfill-books.js
-// One-time cleanup of books saved before Open Library IDs were stored.
-// Admin only: the caller's login email must equal the ADMIN_EMAIL env var.
+// lib/olSearch.js
+// Shared Open Library lookup for the homepage dropdown and /search.
 //
-// POST { mode: 'preview' }            -> proposed changes, nothing written
-// POST { mode: 'apply', ids: [...] }  -> recomputes those books and applies
-//                                        only what the server itself proposes
+// Session cache keyed by NORMALIZED QUERY ONLY. Because this module is a
+// singleton in the client bundle, its cache persists across client-side
+// navigations within a tab — so a term warmed on one surface is instant on the
+// other. (A hard reload resets it; that's fine for a session cache.)
 //
-// For each saved book:
-//   - no book_key  -> look it up on Open Library by title + author; attach the
-//                     work ID only when the author matches (or none was saved)
-//   - has book_key -> look it up by that ID
-// Fallbacks when the title search finds nothing: reuse the ID of another saved
-// copy with the same title, then a broader search (title + first author's last
-// name across all editions, so English titles of translated books match).
-// Rename to the English edition title only when the saved title is the work's
-// original-language title (e.g. "Moi qui n'ai pas connu les hommes"). Titles a
-// host typed differently are left alone. The book's "Open Discussion: <title>"
-// thread is renamed with it.
+// We cache the RAW mapped results (pre-dedupe). Dedupe against on-platform
+// titles is applied PER CALL, because each surface excludes a different catalog
+// (homepage: loaded `books`; /search: that query's book hits). This keeps the
+// cache a pure function of the query and safely reusable across both pages.
+//
+// Debounce + stale-response ordering are CALLER concerns (the homepage's
+// keystroke model needs them; /search's submit model doesn't), so they live in
+// the callers, not here.
 
-import { createClient } from '@supabase/supabase-js'
+const OL_URL = 'https://openlibrary.org/search.json'
+const CACHE_MAX = 100
+const cache = new Map() // normalizedQuery -> mapped[] (pre-dedupe)
 
-const OL = 'https://openlibrary.org/search.json'
-const FIELDS = 'key,title,author_name,editions,editions.title,editions.language'
-const MAX_BOOKS = 300
-const CONCURRENCY = 5
-
-function norm(t) {
-  return String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
-    .replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim()
-}
-
-// Saved author matches one of Open Library's (compares last names loosely)
-function authorMatches(saved, olAuthors) {
-  const s = norm(saved)
-  if (!s) return true
-  const last = s.split(' ').pop()
-  return (olAuthors || []).some(a => { const n = norm(a); return n === s || n.split(' ').pop() === last || n.includes(s) || s.includes(n) })
-}
-
-async function olFetch(params) {
-  const r = await fetch(`${OL}?${params}&lang=en&limit=1&fields=${FIELDS}`, { headers: { 'User-Agent': 'unscripted book club (backfill)' } })
-  if (!r.ok) throw new Error(`OL ${r.status}`)
-  const d = await r.json()
-  return d.docs?.[0] || null
-}
-
-// "Fumitake Koga & Ichiro Kishimi" -> "Koga"
-function firstLastName(author) {
-  const first = String(author || '').split(/,|&| and /i)[0].trim()
-  return first.split(/\s+/).pop() || ''
-}
-
-async function propose(book, siblings) {
-  let doc = null
-  let how = ''
-  if (!book.book_key) {
-    // Another saved copy of the same title is already linked: use its ID
-    const twin = siblings.find(s => s.id !== book.id && s.book_key && norm(s.title) === norm(book.title))
-    if (twin) {
-      const d = await olFetch(`q=${encodeURIComponent(`key:/works/${twin.book_key}`)}`)
-      if (d && authorMatches(book.author, d.author_name)) { doc = d; how = 'same book as another club’s copy' }
-    }
+function cacheSet(k, v) {
+  while (cache.size >= CACHE_MAX) {
+    const oldest = cache.keys().next().value
+    if (oldest === undefined) break
+    cache.delete(oldest)
   }
-  if (doc) {
-    // found via a linked copy
-  } else if (book.book_key) {
-    doc = await olFetch(`q=${encodeURIComponent(`key:/works/${book.book_key}`)}`)
-    how = 'by ID'
-  } else {
-    const p = `title=${encodeURIComponent(book.title)}${book.author ? `&author=${encodeURIComponent(book.author)}` : ''}`
-    doc = await olFetch(p)
-    if (!doc && book.author) doc = await olFetch(`title=${encodeURIComponent(book.title)}&author=${encodeURIComponent(firstLastName(book.author))}`)
-    if (!doc) doc = await olFetch(`q=${encodeURIComponent(`${book.title} ${firstLastName(book.author)}`.trim())}`)
-    how = 'by title'
-    if (doc && !authorMatches(book.author, doc.author_name)) {
-      return { ...base(book), status: 'skip', note: `Closest match "${doc.title}" by ${(doc.author_name || []).join(', ') || 'unknown'}: author doesn't match` }
-    }
+  cache.set(k, v)
+}
+
+function dedupe(mapped, excludeTitles) {
+  const onSite = new Set(excludeTitles.map((t) => String(t || '').toLowerCase()))
+  return mapped.filter((b) => !onSite.has(b.title.toLowerCase())).slice(0, 8)
+}
+
+// Catalog/format cruft that Open Library returns as "subjects" but which isn't a
+// topical tag. Small and editable on purpose — this removes non-topical noise,
+// NOT a semantic vocabulary (no meaning/synonym decisions live here). Matched
+// case-insensitively against the whole subject string.
+const SUBJECT_NOISE = new Set([
+  'accessible book', 'protected daisy', 'in library', 'overdrive',
+  'large type books', 'large print', 'ebook', 'popular print disabled titles',
+])
+
+const MAX_SUBJECTS = 10
+
+// Turn an Open Library `subject` array into candidate tag strings. Preserves the
+// raw subject text (source of truth); drops noise and caps the count. Downstream
+// write paths normalize these via lib/tags.js.
+function extractSubjects(subject) {
+  const out = []
+  for (const s of subject || []) {
+    const raw = String(s || '').trim()
+    if (!raw) continue
+    if (SUBJECT_NOISE.has(raw.toLowerCase())) continue
+    out.push(raw)
+    if (out.length >= MAX_SUBJECTS) break
   }
-  if (!doc) return { ...base(book), status: 'skip', note: 'Not found on Open Library' }
-
-  const key = String(doc.key || '').replace('/works/', '') || null
-  const edTitle = doc.editions?.docs?.[0]?.title || doc.title
-  const savedIsOriginal = norm(book.title) === norm(doc.title)
-  const newTitle = savedIsOriginal && norm(edTitle) !== norm(book.title) ? edTitle : null
-  const newKey = !book.book_key && key ? key : null
-
-  if (!newKey && !newTitle) return { ...base(book), status: 'ok', note: `Already correct (${how})` }
-  return { ...base(book), status: 'change', new_key: newKey, new_title: newTitle, note: how }
-}
-
-function base(b) {
-  return { id: b.id, club: b.club?.name || '', title: b.title, author: b.author || '', book_key: b.book_key || null }
-}
-
-async function mapLimit(items, n, fn) {
-  const out = new Array(items.length)
-  let i = 0
-  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
-    while (i < items.length) {
-      const k = i++
-      try { out[k] = await fn(items[k]) } catch (e) { out[k] = { ...base(items[k]), status: 'skip', note: 'Open Library didn’t answer. Try again.' } }
-    }
-  }))
   return out
 }
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'Method not allowed' }) }
+// Open Library is the source of truth for book identity. Every result carries
+// `key` (the work ID, e.g. OL123W), which saved books store as book_key.
+//
+// Title and cover come from the best-matching ENGLISH edition when Open Library
+// has one (lang=en + editions.*). A work's own title/cover come from its original
+// edition, so translated books (e.g. I Who Have Never Known Men, first published
+// in French) would otherwise show in the original language. `original_title`
+// keeps the work's title so callers can recognize older saves made with it.
+const OL_FIELDS = 'key,title,author_name,cover_i,first_publish_year,subject,' +
+  'editions,editions.key,editions.title,editions.cover_i,editions.language'
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  const adminEmail = (process.env.ADMIN_EMAIL || '').trim().toLowerCase()
-  if (!url || !serviceKey || !adminEmail) return res.status(503).json({ error: 'Not set up yet: ADMIN_EMAIL (and the service role key) must be set in Vercel.', code: 'NOT_CONFIGURED' })
+function normT(t) {
+  return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim()
+}
 
-  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
-  if (!token) return res.status(401).json({ error: 'Please log in again.', code: 'NO_SESSION' })
-  const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } })
-  const { data: userData, error: userErr } = await admin.auth.getUser(token)
-  const email = (userData?.user?.email || '').toLowerCase()
-  if (userErr || !email) return res.status(401).json({ error: 'Please log in again.', code: 'BAD_SESSION' })
-  if (email !== adminEmail) return res.status(403).json({ error: 'Only the site admin can run this.', code: 'NOT_ADMIN' })
+// The title to show for a work, given its best English edition. Use the
+// edition's title only when it's a genuinely different title (a translation,
+// e.g. "Moi qui n'ai pas connu les hommes" -> "I Who Have Never Known Men").
+// Keep the work's title when the edition is just a variant of it ("Klara and
+// the Sun * Christmas EDI", "... : A Novel") or is marked non-English.
+export function preferredTitle(workTitle, edition) {
+  const ed = edition?.title
+  if (!ed) return workTitle
+  const langs = edition.language || []
+  if (langs.length && !langs.includes('eng')) return workTitle
+  const strip = t => t.replace(/^(the|a|an) /, '')
+  const w = strip(normT(workTitle)), e = strip(normT(ed))
+  if (!w) return ed
+  if (e === w || e.startsWith(w) || w.startsWith(e)) return workTitle
+  return ed
+}
 
-  const mode = req.body?.mode === 'apply' ? 'apply' : 'preview'
-  let q = admin.from('books').select('id, title, author, book_key, club:clubs(name)').order('created_at').limit(MAX_BOOKS)
-  if (mode === 'apply') {
-    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).slice(0, MAX_BOOKS) : []
-    if (!ids.length) return res.status(400).json({ error: 'Nothing selected.', code: 'NO_IDS' })
-    q = q.in('id', ids)
+function mapDoc(doc) {
+  const ed = doc.editions?.docs?.[0]
+  const title = preferredTitle(doc.title, ed)
+  return {
+    key: doc.key.replace('/works/', ''),
+    title,
+    original_title: doc.title,
+    author: (doc.author_name || []).join(', '),
+    // Translated: the English edition's cover (never the original-language one).
+    // Same-language: the work's usual cover, falling back to the edition's.
+    cover: title !== doc.title ? (ed?.cover_i || null) : (doc.cover_i || ed?.cover_i || null),
+    year: doc.first_publish_year,
+    edition_key: ed?.key ? String(ed.key).replace('/books/', '') : null,
+    subjects: extractSubjects(doc.subject),
   }
-  const { data: books, error } = await q
-  if (error) return res.status(500).json({ error: 'Couldn’t read books.', code: 'READ_FAILED' })
+}
 
-  // All saved copies (for reusing an already-linked copy's ID)
-  const { data: siblings } = await admin.from('books').select('id, title, book_key').not('book_key', 'is', null).limit(2000)
-  const results = await mapLimit(books || [], CONCURRENCY, b => propose(b, siblings || []))
-  if (mode === 'preview') return res.status(200).json({ results })
+// Shared search URL (also used by callers that need more than 12 results)
+export function olSearchUrl(query, limit = 12) {
+  return `${OL_URL}?q=${encodeURIComponent(query)}&lang=en&limit=${limit}&fields=${OL_FIELDS}`
+}
 
-  let applied = 0
-  const failed = []
-  for (const r of results) {
-    if (r.status !== 'change') continue
-    const patch = {}
-    if (r.new_key) patch.book_key = r.new_key
-    if (r.new_title) patch.title = r.new_title
-    const { error: uErr } = await admin.from('books').update(patch).eq('id', r.id)
-    if (uErr) { failed.push(r.id); continue }
-    if (r.new_title) {
-      await admin.from('threads').update({ title: `Open Discussion: ${r.new_title}` })
-        .eq('book_id', r.id).eq('chapter_number', 0).eq('title', `Open Discussion: ${r.title}`)
+// Async lookup: returns up to 8 wider-catalog books, excluding on-site titles.
+// Cache hits skip the network. Failures return [] and are NOT cached (retry).
+
+export async function olSearch(query, { excludeTitles = [] } = {}) {
+  const key = String(query || '').trim().toLowerCase()
+  if (key.length < 2) return []
+
+  let mapped = cache.get(key)
+  if (!mapped) {
+    try {
+      const r = await fetch(olSearchUrl(query, 12))
+      const d = await r.json()
+      mapped = (d.docs || [])
+        .filter((doc) => doc.title && doc.key)
+        .map(mapDoc)
+      cacheSet(key, mapped)
+    } catch {
+      return []
     }
-    applied++
   }
-  return res.status(200).json({ applied, failed, results })
+  return dedupe(mapped, excludeTitles)
+}
+
+// Synchronous cache peek: returns deduped hits if the query is already warm,
+// else null. Lets the homepage render instantly on a hit (no debounce, no
+// network) without awaiting.
+export function olPeek(query, { excludeTitles = [] } = {}) {
+  const key = String(query || '').trim().toLowerCase()
+  const mapped = cache.get(key)
+  return mapped ? dedupe(mapped, excludeTitles) : null
+}
+
+// Strip everything but digits and a trailing X (ISBN-10 check digit).
+function normalizeIsbn(isbn) {
+  return String(isbn || '').replace(/[^0-9Xx]/g, '').toUpperCase()
+}
+
+// Exact lookup for the manual-add flow: resolve an ISBN to a single normalized
+// book, or null. Does NOT dedupe or slice: the caller wants this exact book
+// regardless of what's already on the platform. The returned object carries
+// the cleaned isbn so the caller can persist it directly.
+//
+// Title and cover come from the EDITION that owns the ISBN, not the work.
+// A work's title/cover default to its original edition, so a translated book
+// (e.g. I Who Have Never Known Men, first published in French) would otherwise
+// come back in the original language. Falls back to the work's values only if
+// Open Library returns no edition data at all.
+export async function olLookupIsbn(isbn) {
+  const clean = normalizeIsbn(isbn)
+  if (clean.length !== 10 && clean.length !== 13) return null
+
+  const cacheK = `isbn:${clean}`
+  let mapped = cache.get(cacheK)
+  if (!mapped) {
+    try {
+      const r = await fetch(
+        `${OL_URL}?q=isbn:${encodeURIComponent(clean)}&limit=1` +
+        `&fields=key,title,author_name,cover_i,first_publish_year,subject,` +
+        `editions,editions.key,editions.title,editions.subtitle,editions.cover_i,editions.language`
+      )
+      const d = await r.json()
+      mapped = (d.docs || [])
+        .filter((doc) => doc.title && doc.key)
+        .map((doc) => {
+          const base = { ...mapDoc(doc), subjects: extractSubjects(doc.subject) }
+          const ed = doc.editions?.docs?.[0]
+          if (!ed) return base // no edition data: keep the work's values
+          return {
+            ...base,
+            title: ed.title || base.title,
+            // The edition's own cover, or none (never the original-language one)
+            cover: ed.cover_i || null,
+            edition_key: ed.key ? String(ed.key).replace('/books/', '') : null,
+          }
+        })
+      cacheSet(cacheK, mapped)
+    } catch {
+      return null
+    }
+  }
+  return mapped.length ? { ...mapped[0], isbn: clean } : null
 }
