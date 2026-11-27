@@ -9,6 +9,7 @@ import ManualBookAdd from '../../components/ManualBookAdd'
 import Bookshelf, { BookCover } from '../../components/Bookshelf'
 import BookPicker from '../../components/BookPicker'
 import { normalizeTags } from '../../lib/tags'
+import { olSearch } from '../../lib/olSearch'
 
 function timeAgo(date) {
   const s = Math.floor((Date.now() - new Date(date)) / 1000)
@@ -423,18 +424,13 @@ export default function ClubPage() {
     setBkL(true)
     timer.current = setTimeout(async () => {
       try {
-        // Ask for the best-matching English edition too: a work's own title and
-        // cover come from its original edition, so translated books (e.g. I Who
-        // Have Never Known Men, first published in French) would show in the
-        // original language. Falls back to the work when there's no edition data.
-        const r = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(val)}&lang=en&limit=5&fields=title,author_name,first_publish_year,cover_i,editions,editions.title,editions.cover_i,editions.language`)
-        const d = await r.json()
-        setBkR((d.docs || []).map(b => {
-          const ed = b.editions?.docs?.[0]
-          const title = ed?.title || b.title
-          const coverId = ed ? ed.cover_i : b.cover_i
-          return { title, author: (b.author_name || [])[0] || 'Unknown', year: b.first_publish_year, cover: coverId ? `https://covers.openlibrary.org/b/id/${coverId}-S.jpg` : null }
-        }).filter(b => b.title))
+        // Shared Open Library search (English editions, carries the work ID)
+        const hits = await olSearch(val)
+        setBkR(hits.slice(0, 8).map(b => ({
+          title: b.title, author: (b.author || '').split(', ')[0] || 'Unknown', year: b.year,
+          cover: b.cover ? `https://covers.openlibrary.org/b/id/${b.cover}-S.jpg` : null,
+          key: b.key, subjects: b.subjects || [],
+        })))
       } catch (e) { setBkR([]) }
       setBkL(false)
     }, 400)
@@ -768,7 +764,7 @@ export default function ClubPage() {
             <input className="field-input" style={{ marginBottom: 0 }} placeholder="Start typing a title..." value={bkQ} onChange={e => searchBook(e.target.value)} />
             {(bkR.length > 0 || bkL) && <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 12, boxShadow: '0 12px 32px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 280, overflowY: 'auto', marginTop: 4 }}>
               {bkL && <div style={{ padding: '16px 20px', fontFamily: 'var(--ui)', fontSize: 13, color: 'var(--txD)' }}>Searching...</div>}
-              {bkR.map((b, i) => <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }} onClick={() => { setNewBook(d => ({ ...d, title: b.title, author: b.author, isbn: null, book_key: null, source: 'openlibrary', tags: [] })); setBkQ(''); setBkR([]) }}>
+              {bkR.map((b, i) => <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 20px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }} onClick={() => { setNewBook(d => ({ ...d, title: b.title, author: b.author, isbn: null, book_key: b.key || null, source: 'openlibrary', tags: b.subjects || [] })); setBkQ(''); setBkR([]) }}>
                 {b.cover ? <img src={b.cover} style={{ width: 32, height: 44, borderRadius: 4, objectFit: 'cover' }} alt="" /> : <span style={{ fontSize: 20 }}>📖</span>}
                 <div><div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, color: 'var(--ink)' }}>{b.title}</div><div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.year ? ` · ${b.year}` : ''}</div></div>
               </div>)}
