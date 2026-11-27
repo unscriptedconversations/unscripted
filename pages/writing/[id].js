@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/router'
+import Head from 'next/head'
+import { createClient } from '@supabase/supabase-js'
 import { supabase } from '../../lib/supabase'
 import TopNav from '../../components/TopNav'
 import { createNotification } from '../../lib/notify'
@@ -19,7 +21,35 @@ function readMinutes(t) { const n = String(t || '').trim() ? String(t).trim().sp
 
 const FORMAT_LABEL = { essay: 'Essay', reflection: 'Reflection', note: 'Note' }
 
-export default function WritingPage() {
+// Link previews (texts, social media): crawlers don't run the page's scripts,
+// so the title / description come from the server. Only published pieces get
+// details; anything else falls back to the site name. Never blocks the page.
+export async function getServerSideProps({ params, req }) {
+  let og = null
+  try {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    const id = String(params?.id || '')
+    if (url && key && /^[0-9a-f-]{36}$/i.test(id)) {
+      const sb = createClient(url, key, { auth: { persistSession: false } })
+      const { data: w } = await sb.from('writings').select('id, title, subtitle, content, is_published, member_id').eq('id', id).maybeSingle()
+      if (w && w.is_published) {
+        const { data: m } = await sb.from('members').select('first_name, last_name').eq('id', w.member_id).maybeSingle()
+        const plain = plainText(w.content).replace(/\s+/g, ' ').trim()
+        const host = req?.headers?.['x-forwarded-host'] || req?.headers?.host || ''
+        og = {
+          title: w.title,
+          description: (w.subtitle || plain).slice(0, 200) + ((w.subtitle || plain).length > 200 ? '\u2026' : ''),
+          author: m ? `${m.first_name || ''} ${m.last_name || ''}`.trim() : '',
+          url: host ? `https://${host}/writing/${w.id}` : '',
+        }
+      }
+    }
+  } catch (e) { og = null }
+  return { props: { og } }
+}
+
+export default function WritingPage({ og }) {
   const router = useRouter()
   const { id } = router.query
   const [writing, setWriting] = useState(null)
@@ -142,8 +172,24 @@ export default function WritingPage() {
     } catch (e) { /* closed the share sheet */ }
   }
 
-  if (notFound) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontFamily: 'var(--ui)', color: 'var(--txD)' }}>This piece isn't available.</div></div>
-  if (!writing) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ fontFamily: 'var(--ui)', color: 'var(--txD)' }}>Loading...</div></div>
+  const ogHead = (
+    <Head>
+      <title>{og?.title ? `${og.title} — unscripted` : 'unscripted'}</title>
+      <meta property="og:site_name" content="unscripted" />
+      <meta property="og:type" content="article" />
+      <meta property="og:title" content={og?.title || 'unscripted'} />
+      <meta property="og:description" content={og?.description || 'Writing from readers on unscripted.'} />
+      {og?.url && <meta property="og:url" content={og.url} />}
+      {og?.author && <meta name="author" content={og.author} />}
+      <meta name="description" content={og?.description || 'Writing from readers on unscripted.'} />
+      <meta name="twitter:card" content="summary" />
+      <meta name="twitter:title" content={og?.title || 'unscripted'} />
+      <meta name="twitter:description" content={og?.description || 'Writing from readers on unscripted.'} />
+    </Head>
+  )
+
+  if (notFound) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{ogHead}<div style={{ fontFamily: 'var(--ui)', color: 'var(--txD)' }}>This piece isn't available.</div></div>
+  if (!writing) return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{ogHead}<div style={{ fontFamily: 'var(--ui)', color: 'var(--txD)' }}>Loading...</div></div>
 
   const isOwner = currentUser && currentUser.id === writing.member_id
 
@@ -154,7 +200,7 @@ export default function WritingPage() {
 
   return (
     <div style={{ minHeight: '100vh' }}>
-      <title>{writing.title} — unscripted</title>
+      {ogHead}
       <TopNav />
       <article style={{ maxWidth: 680, margin: '0 auto', padding: '0 28px 96px' }}>
         <div style={{ padding: '20px 0 40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
