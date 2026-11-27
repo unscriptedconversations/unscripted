@@ -30,6 +30,8 @@ export default function Write() {
   const [suggesting, setSuggesting] = useState(false)
   const [suggestNote, setSuggestNote] = useState('')
   const [draftCount, setDraftCount] = useState(0)
+  const [pubCount, setPubCount] = useState(0)
+  const [saveError, setSaveError] = useState('')
   const [justPublished, setJustPublished] = useState(null) // { id, title, club } after Publish
   // Only offer "Suggest themes" when AI is on. /api/themes answers an empty
   // request with { disabled: true } when ANTHROPIC_API_KEY is unset; it checks
@@ -63,8 +65,12 @@ export default function Write() {
   }, [router.isReady])
 
   async function loadDraftCount(memberId) {
-    const { count } = await supabase.from('writings').select('id', { count: 'exact', head: true }).eq('member_id', memberId).eq('is_published', false)
-    setDraftCount(count || 0)
+    const [d, p] = await Promise.all([
+      supabase.from('writings').select('id', { count: 'exact', head: true }).eq('member_id', memberId).eq('is_published', false),
+      supabase.from('writings').select('id', { count: 'exact', head: true }).eq('member_id', memberId).eq('is_published', true),
+    ])
+    setDraftCount(d.count || 0)
+    setPubCount(p.count || 0)
   }
 
   // Start a fresh piece in place (after publishing)
@@ -125,6 +131,8 @@ export default function Write() {
     if (!currentUser || !title.trim() || !content.trim()) return
     if (publish && format === 'reflection' && (content.trim() ? content.trim().split(/\s+/).length : 0) > REFLECTION_MAX) return
     setSaving(true)
+    setSaveError('')
+    setSaved(false)
     const tags = tagsInput.split(',').map(t => t.trim()).filter(Boolean)
     const payload = {
       member_id: currentUser.id,
@@ -134,15 +142,24 @@ export default function Write() {
       club_id: clubId || null,
       tags,
       is_published: publish,
-      published_at: publish ? new Date().toISOString() : null,
       updated_at: new Date().toISOString(),
     }
+    // Keep the original publish date when re-publishing an edit
+    if (!(publish && isPublished)) payload.published_at = publish ? new Date().toISOString() : null
     let savedId = writingId
+    let err = null
     if (writingId) {
-      await supabase.from('writings').update(payload).eq('id', writingId)
+      const { data, error } = await supabase.from('writings').update(payload).eq('id', writingId).select('id')
+      err = error || (!data?.length ? { message: 'No changes were saved.', code: 'NOT_SAVED' } : null)
     } else {
-      const { data } = await supabase.from('writings').insert(payload).select().single()
+      const { data, error } = await supabase.from('writings').insert(payload).select().single()
+      err = error || (!data ? { message: 'No changes were saved.', code: 'NOT_SAVED' } : null)
       if (data) { savedId = data.id; setWritingId(data.id) }
+    }
+    if (err) {
+      setSaving(false)
+      setSaveError(`Sorry, your piece couldn\u2019t be ${publish ? 'published' : 'saved'}. Your text is still here, so please try again.` + (err.code ? ` (Error code: ${err.code})` : '') + (err.message ? `\n${err.message}` : ''))
+      return
     }
     setIsPublished(publish)
     setSaving(false)
@@ -182,6 +199,7 @@ export default function Write() {
   )
 
   const nextBtn = { ...btnO, padding: '12px 20px', fontSize: 11 }
+  const pill = { fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--ink)', background: 'var(--sf)', border: '1.5px solid var(--bd2)', borderRadius: 100, padding: '8px 16px', cursor: 'pointer' }
 
   if (justPublished) return (
     <div style={{ minHeight: '100vh' }}>
@@ -209,9 +227,10 @@ export default function Write() {
       <TopNav />
       <div style={{ maxWidth: 680, margin: '0 auto', padding: '0 28px 80px' }}>
         <div style={{ padding: '20px 0 32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <button onClick={() => router.push(`/profile/${currentUser.id}?tab=writing`)} style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--tc)', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
-            {'\u2190'} Your writing{draftCount > 0 ? ` \u00B7 ${draftCount} ${draftCount === 1 ? 'draft' : 'drafts'}` : ''}
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button onClick={() => router.push(`/profile/${currentUser.id}?tab=writing`)} style={pill}>Drafts ({draftCount})</button>
+            <button onClick={() => router.push(`/profile/${currentUser.id}?tab=writing`)} style={pill}>Published ({pubCount})</button>
+          </div>
           {isPublished && <span style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--sg)', background: 'rgba(94,122,98,0.1)', borderRadius: 100, padding: '6px 14px' }}>Published</span>}
         </div>
 
@@ -261,9 +280,10 @@ export default function Write() {
         </div>}
 
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <button style={btnO} disabled={saving} onClick={() => save(false)}>Save draft</button>
+          <button style={btnO} disabled={saving} onClick={() => save(false)}>{isPublished ? 'Move to drafts' : 'Save draft'}</button>
           <button style={{ ...btn, flex: 1, opacity: (title.trim() && content.trim() && !overLimit) ? 1 : 0.4 }} disabled={saving || !title.trim() || !content.trim() || overLimit} onClick={() => save(true)}>Publish</button>
         </div>
+        {saveError && <div role="alert" style={{ fontFamily: 'var(--ui)', fontSize: 12, color: '#A0603E', marginTop: 12, textAlign: 'center', lineHeight: 1.6, whiteSpace: 'pre-line' }}>{saveError}</div>}
         {saved && <div role="status" style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--sg)', marginTop: 12, textAlign: 'center' }}>
           {isPublished ? 'Saved' : <>Saved to your drafts {'\u00B7'} <span style={{ color: 'var(--tc)', fontWeight: 600, cursor: 'pointer' }} onClick={() => router.push(`/profile/${currentUser.id}?tab=writing`)}>View your drafts</span></>}
         </div>}
