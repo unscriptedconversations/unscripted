@@ -14,11 +14,14 @@
 // copy with the same title, then a broader search (title + first author's last
 // name across all editions, so English titles of translated books match).
 // Rename to the English edition title only when the saved title is the work's
-// original-language title (e.g. "Moi qui n'ai pas connu les hommes"). Titles a
-// host typed differently are left alone. The book's "Open Discussion: <title>"
+// original-language title (e.g. "Moi qui n'ai pas connu les hommes") and the
+// English title is a real translation, not a variant edition ("Klara and the
+// Sun * Christmas EDI"); same rule as the site (preferredTitle). Titles a host
+// typed differently are left alone. The book's "Open Discussion: <title>"
 // thread is renamed with it.
 
 import { createClient } from '@supabase/supabase-js'
+import { preferredTitle } from '../../lib/olSearch'
 
 const OL = 'https://openlibrary.org/search.json'
 const FIELDS = 'key,title,author_name,editions,editions.title,editions.language'
@@ -80,9 +83,9 @@ async function propose(book, siblings) {
   if (!doc) return { ...base(book), status: 'skip', note: 'Not found on Open Library' }
 
   const key = String(doc.key || '').replace('/works/', '') || null
-  const edTitle = doc.editions?.docs?.[0]?.title || doc.title
+  const showTitle = preferredTitle(doc.title, doc.editions?.docs?.[0])
   const savedIsOriginal = norm(book.title) === norm(doc.title)
-  const newTitle = savedIsOriginal && norm(edTitle) !== norm(book.title) ? edTitle : null
+  const newTitle = savedIsOriginal && norm(showTitle) !== norm(book.title) ? showTitle : null
   const newKey = !book.book_key && key ? key : null
 
   if (!newKey && !newTitle) return { ...base(book), status: 'ok', note: `Already correct (${how})` }
