@@ -58,6 +58,29 @@ const SPOTLIGHT_SLIDES = [
   },
 ]
 
+// Loose title match for older saved books that have no Open Library ID:
+// lowercase, no accents or punctuation, single spaces. (Same as pages/search.js.)
+function normTitle(t) {
+  return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+// Open Library is the source of truth for books. Each catalog result gets the
+// clubs reading it, matched by book_key (Open Library work ID), or by title for
+// older saves without one. Saved books that match nothing come back as siteOnly.
+function mergeBooks(ol, saved) {
+  const used = new Set()
+  const merged = ol.map(o => {
+    const titles = new Set([normTitle(o.title), normTitle(o.original_title)])
+    const mine = saved.filter(b => (b.book_key && b.book_key === o.key) || (!b.book_key && titles.has(normTitle(b.title))))
+    mine.forEach(b => used.add(b.id))
+    const clubs = []
+    for (const b of mine) if (b.club && !clubs.some(c => c.name === b.club.name)) clubs.push({ name: b.club.name })
+    return { ...o, clubs }
+  })
+  return { merged, siteOnly: saved.filter(b => !used.has(b.id)) }
+}
+
 export default function Landing() {
   const router = useRouter()
   // Slideshow: slides sit side by side on a track that slides left. A copy of
@@ -88,7 +111,7 @@ export default function Landing() {
   const [clubs, setClubs] = useState([])
   // Titles of on-site books matching the current search, so Open Library
   // results don't repeat them.
-  const siteTitles = useRef(new Set())
+  const [keyedSaved, setKeyedSaved] = useState([]) // saved copies of the Open Library results, by book_key
   const [trending, setTrending] = useState([])
   const [q, setQ] = useState('')
   const [sr, setSR] = useState(null)
@@ -199,7 +222,7 @@ export default function Landing() {
 
   function doSearch(val) {
     setQ(val)
-    if (val.length < 2) { setSR(null); setOlBooks([]); setWHits([]); setMHits([]); setOlLoading(false); return }
+    if (val.length < 2) { setSR(null); setOlBooks([]); setKeyedSaved([]); setWHits([]); setMHits([]); setOlLoading(false); return }
     searchClubsBooks(val)
     setSrTab('all')
     searchOpenLibrary(val)
@@ -221,14 +244,11 @@ export default function Landing() {
       const [cR, bR] = await Promise.all([
         supabase.from('clubs').select('*, club_members(count), books(title, author, status)').eq('discoverable', true)
           .or(`name.ilike.${like},description.ilike.${like},tags.cs.{"${term}"}`).limit(8),
-        supabase.from('books').select('id, title, author, tags, club:clubs!inner(name, discoverable)').eq('club.discoverable', true)
+        supabase.from('books').select('id, title, author, tags, book_key, club:clubs!inner(name, discoverable)').eq('club.discoverable', true)
           .or(nterm ? `title.ilike.${like},author.ilike.${like},tags_norm.cs.{"${nterm}"}` : `title.ilike.${like},author.ilike.${like}`).limit(8),
       ])
       if (seq !== cbSeq) return
-      const bookHits = bR.data || []
-      siteTitles.current = new Set(bookHits.map(b => String(b.title || '').toLowerCase()))
-      setOlBooks(prev => prev.filter(o => !siteTitles.current.has(String(o.title || '').toLowerCase())))
-      setSR({ clubs: cR.data || [], books: bookHits })
+      setSR({ clubs: cR.data || [], books: bR.data || [] })
     }, 250)
   }
 
@@ -239,18 +259,30 @@ export default function Landing() {
     const seq = ++olSeq
     clearTimeout(olTimer)
 
+    // Saved copies of these exact books, whatever title they were saved under
+    async function loadKeyed(hits) {
+      const keys = hits.map(h => h.key).filter(Boolean)
+      if (!keys.length) { setKeyedSaved([]); return }
+      const { data } = await supabase.from('books').select('id, title, author, book_key, club:clubs!inner(name, discoverable)')
+        .eq('club.discoverable', true).in('book_key', keys).limit(60)
+      if (seq === olSeq) setKeyedSaved(data || [])
+    }
+
     // Cache hit → instant. Skip the debounce and the network entirely.
-    const warm = olPeek(val, { excludeTitles: [...siteTitles.current] })
+    const warm = olPeek(val)
     if (warm) {
       setOlBooks(warm)
       setOlLoading(false)
+      loadKeyed(warm)
       return
     }
 
     setOlLoading(true)
     olTimer = setTimeout(async () => {
-      const hits = await olSearch(val, { excludeTitles: [...siteTitles.current] })
+      const hits = await olSearch(val)
       if (seq === olSeq) {
+        await loadKeyed(hits)
+        if (seq !== olSeq) return
         setOlBooks(hits)
         setOlLoading(false)
       }
@@ -342,6 +374,12 @@ export default function Landing() {
     ? featuredClubs.slice(0, 3)
     : [...clubs].sort((a, b) => getClubMemberCount(b) - getClubMemberCount(a)).slice(0, 3)
 
+  // Search dropdown books: Open Library results with clubs reading each, then
+  // saved books Open Library doesn't know (shown once the catalog has answered)
+  const savedForMerge = sr ? [...sr.books, ...keyedSaved.filter(k => !sr.books.some(b => b.id === k.id))] : keyedSaved
+  const { merged: bookResults, siteOnly: siteOnlyRaw } = mergeBooks(olBooks, savedForMerge)
+  const siteOnlyBooks = olLoading ? [] : siteOnlyRaw
+
   return (
     <div style={{ minHeight: '100vh' }}>
       <title>unscripted — every reader deserves a room</title>
@@ -390,9 +428,9 @@ export default function Landing() {
             <span style={{ position: 'absolute', left: 20, top: '50%', transform: 'translateY(-50%)', fontSize: 18 }}>🔍</span>
 
             {sr && <div style={{ position: 'absolute', top: 'calc(100% + 8px)', left: 0, right: 0, background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.1)', zIndex: 50, maxHeight: 400, overflowY: 'auto' }}>
-              {(sr.clubs.length > 0 || sr.books.length > 0 || olBooks.length > 0) && (
+              {(sr.clubs.length > 0 || siteOnlyBooks.length > 0 || bookResults.length > 0) && (
                 <div style={{ display: 'flex', gap: 6, padding: '12px 16px', borderBottom: '1px solid var(--bd)', position: 'sticky', top: 0, background: 'var(--sf)', zIndex: 1 }}>
-                  {[['all', 'All', sr.clubs.length + sr.books.length + olBooks.length + mHits.length + wHits.length], ['clubs', 'Clubs', sr.clubs.length], ['books', 'Books', sr.books.length + olBooks.length], ['magazines', 'Magazines', mHits.length], ['writings', 'Writing', wHits.length]].map(([k, label, n]) => (
+                  {[['all', 'All', sr.clubs.length + siteOnlyBooks.length + bookResults.length + mHits.length + wHits.length], ['clubs', 'Clubs', sr.clubs.length], ['books', 'Books', siteOnlyBooks.length + bookResults.length], ['magazines', 'Magazines', mHits.length], ['writings', 'Writing', wHits.length]].map(([k, label, n]) => (
                     <button key={k} onClick={() => setSrTab(k)}
                       style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: srTab === k ? 'var(--tc)' : 'var(--txD)', background: srTab === k ? 'var(--tcD)' : 'transparent', border: '1px solid ' + (srTab === k ? 'var(--tc)' : 'var(--bd)'), borderRadius: 100, padding: '6px 14px', cursor: 'pointer' }}>
                       {label} {n}
@@ -400,7 +438,7 @@ export default function Landing() {
                   ))}
                 </div>
               )}
-              {sr.clubs.length === 0 && sr.books.length === 0 && olBooks.length === 0 && mHits.length === 0 && wHits.length === 0 && !olLoading && (
+              {sr.clubs.length === 0 && siteOnlyBooks.length === 0 && bookResults.length === 0 && mHits.length === 0 && wHits.length === 0 && !olLoading && (
                 <div style={{ padding: 24, fontFamily: 'var(--ui)', fontSize: 14, color: 'var(--txD)', textAlign: 'center' }}>No results for "{q}"</div>
               )}
               {(srTab === 'all' || srTab === 'clubs') && sr.clubs.length > 0 && <div>
@@ -418,36 +456,33 @@ export default function Landing() {
                   </div>
                 ))}
               </div>}
-              {(srTab === 'all' || srTab === 'books') && sr.books.length > 0 && <div>
-                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>On unscripted</div>
-                {sr.books.map(b => (
-                  <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
-                    onClick={() => router.push(`/book/${b.id}`)}>
-                    <span style={{ fontSize: 20 }}>📖</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</div>
-                      <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.club ? ` · ${b.club.name}` : ''}</div>
-                      {(b.tags || []).length > 0 && <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
-                        {b.tags.slice(0, 3).map(t => <span key={t} style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 600, letterSpacing: 0.5, color: 'var(--sg)', background: 'rgba(94,122,98,0.1)', borderRadius: 100, padding: '2px 8px' }}>{t}</span>)}
-                      </div>}
-                    </div>
-                  </div>
-                ))}
-              </div>}
-              {(srTab === 'all' || srTab === 'books') && (olLoading || olBooks.length > 0) && <div>
-                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>All books</div>
-                {olLoading && olBooks.length === 0 && <div style={{ padding: '12px 24px 20px', fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>Searching…</div>}
-                {olBooks.map(b => (
+              {(srTab === 'all' || srTab === 'books') && (olLoading || bookResults.length > 0) && <div>
+                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Books</div>
+                {olLoading && bookResults.length === 0 && <div style={{ padding: '12px 24px 20px', fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)' }}>Searching…</div>}
+                {bookResults.map(b => (
                   <div key={b.key} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
                     onClick={() => router.push(`/book/${b.key}`)}>
                     {b.cover
                       ? <img src={`https://covers.openlibrary.org/b/id/${b.cover}-S.jpg`} alt="" style={{ width: 28, height: 42, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }} />
                       : <span style={{ fontSize: 20, width: 28, textAlign: 'center' }}>📖</span>}
-                    <div style={{ flex: 1 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</div>
                       <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.year ? ` · ${b.year}` : ''}</div>
+                      {b.clubs.length > 0 && <div style={{ fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 600, color: 'var(--tc)', marginTop: 3 }}>Reading in {b.clubs[0].name}{b.clubs.length > 1 ? ` + ${b.clubs.length - 1} more` : ''}</div>}
                     </div>
-                    <span style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--txD)', flexShrink: 0 }}>Not on unscripted</span>
+                  </div>
+                ))}
+              </div>}
+              {(srTab === 'all' || srTab === 'books') && siteOnlyBooks.length > 0 && <div>
+                <div style={{ padding: '12px 24px 8px', fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)' }}>Added by clubs</div>
+                {siteOnlyBooks.map(b => (
+                  <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', cursor: 'pointer', borderBottom: '1px solid var(--bd)' }}
+                    onClick={() => router.push(`/book/${b.id}`)}>
+                    <span style={{ fontSize: 20, width: 28, textAlign: 'center' }}>📖</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, fontStyle: 'italic', color: 'var(--ink)' }}>{b.title}</div>
+                      <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)' }}>{b.author}{b.club ? ` · ${b.club.name}` : ''}</div>
+                    </div>
                   </div>
                 ))}
               </div>}
