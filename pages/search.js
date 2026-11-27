@@ -8,6 +8,7 @@ import { BRIDGE_ENABLED } from '../lib/flags'
 import { magazineCover } from '../lib/magazineCover'
 import { olSearch } from '../lib/olSearch'
 import { normalizeTag } from '../lib/tags'
+import { plainText } from '../lib/formatText'
 
 function initialsFor(m) {
   if (m?.initials) return m.initials
@@ -253,7 +254,7 @@ export default function SearchPage() {
     return [...byName.values()].sort((a, b) => (b.onSite - a.onSite) || (b.titles.size - a.titles.size)).slice(0, 8)
   })()
   const totalOnSite = clubs.length + books.length + magazines.length + writings.length + authors.length + bookAuthors.length + bridges.length + olBooks.length
-  const preview = t => (t || '').length > 160 ? t.slice(0, 160) + '…' : t
+  const preview = t => { const p = plainText(t).replace(/\s+/g, ' ').trim(); return p.length > 160 ? p.slice(0, 160) + '\u2026' : p }
 
   const rowStyle = { display: 'flex', alignItems: 'center', gap: 14, padding: '16px 20px', background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 12, marginBottom: 10, cursor: 'pointer' }
 
