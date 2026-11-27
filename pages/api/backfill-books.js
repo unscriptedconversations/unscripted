@@ -10,6 +10,9 @@
 //   - no book_key  -> look it up on Open Library by title + author; attach the
 //                     work ID only when the author matches (or none was saved)
 //   - has book_key -> look it up by that ID
+// Fallbacks when the title search finds nothing: reuse the ID of another saved
+// copy with the same title, then a broader search (title + first author's last
+// name across all editions, so English titles of translated books match).
 // Rename to the English edition title only when the saved title is the work's
 // original-language title (e.g. "Moi qui n'ai pas connu les hommes"). Titles a
 // host typed differently are left alone. The book's "Open Discussion: <title>"
@@ -42,16 +45,33 @@ async function olFetch(params) {
   return d.docs?.[0] || null
 }
 
-async function propose(book) {
+// "Fumitake Koga & Ichiro Kishimi" -> "Koga"
+function firstLastName(author) {
+  const first = String(author || '').split(/,|&| and /i)[0].trim()
+  return first.split(/\s+/).pop() || ''
+}
+
+async function propose(book, siblings) {
   let doc = null
   let how = ''
-  if (book.book_key) {
+  if (!book.book_key) {
+    // Another saved copy of the same title is already linked: use its ID
+    const twin = siblings.find(s => s.id !== book.id && s.book_key && norm(s.title) === norm(book.title))
+    if (twin) {
+      const d = await olFetch(`q=${encodeURIComponent(`key:/works/${twin.book_key}`)}`)
+      if (d && authorMatches(book.author, d.author_name)) { doc = d; how = 'same book as another club’s copy' }
+    }
+  }
+  if (doc) {
+    // found via a linked copy
+  } else if (book.book_key) {
     doc = await olFetch(`q=${encodeURIComponent(`key:/works/${book.book_key}`)}`)
     how = 'by ID'
   } else {
     const p = `title=${encodeURIComponent(book.title)}${book.author ? `&author=${encodeURIComponent(book.author)}` : ''}`
     doc = await olFetch(p)
-    if (!doc && book.author) doc = await olFetch(`title=${encodeURIComponent(book.title)}`)
+    if (!doc && book.author) doc = await olFetch(`title=${encodeURIComponent(book.title)}&author=${encodeURIComponent(firstLastName(book.author))}`)
+    if (!doc) doc = await olFetch(`q=${encodeURIComponent(`${book.title} ${firstLastName(book.author)}`.trim())}`)
     how = 'by title'
     if (doc && !authorMatches(book.author, doc.author_name)) {
       return { ...base(book), status: 'skip', note: `Closest match "${doc.title}" by ${(doc.author_name || []).join(', ') || 'unknown'}: author doesn't match` }
@@ -111,7 +131,9 @@ export default async function handler(req, res) {
   const { data: books, error } = await q
   if (error) return res.status(500).json({ error: 'Couldn’t read books.', code: 'READ_FAILED' })
 
-  const results = await mapLimit(books || [], CONCURRENCY, propose)
+  // All saved copies (for reusing an already-linked copy's ID)
+  const { data: siblings } = await admin.from('books').select('id, title, book_key').not('book_key', 'is', null).limit(2000)
+  const results = await mapLimit(books || [], CONCURRENCY, b => propose(b, siblings || []))
   if (mode === 'preview') return res.status(200).json({ results })
 
   let applied = 0
