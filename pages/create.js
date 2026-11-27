@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/router'
 import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
 import TopNav from '../components/TopNav'
 import ManualBookAdd from '../components/ManualBookAdd'
 import { normalizeTags } from '../lib/tags'
+import { olSearch } from '../lib/olSearch'
 
 export default function CreateClub() {
   const router = useRouter()
@@ -20,6 +21,7 @@ export default function CreateClub() {
   const [noCh, setNoCh] = useState(false)
   const [bkQ, setBkQ] = useState('')
   const [bkR, setBkR] = useState([])
+  const bkSeq = useRef(0) // drops out-of-order search responses
   const [bookIsbn, setBookIsbn] = useState(null)
   const [bookTags, setBookTags] = useState([])
   const [bookKey, setBookKey] = useState(null)
@@ -43,6 +45,8 @@ export default function CreateClub() {
   useEffect(() => {
     if (!router.isReady) return
     if (router.query.bookTitle) { setBookTitle(String(router.query.bookTitle)); setBkQ(String(router.query.bookTitle)) }
+    // Open Library work ID, when the link carries one (e.g. from a book page)
+    if (typeof router.query.bookKey === 'string' && /^OL\d+W$/i.test(router.query.bookKey)) setBookKey(router.query.bookKey)
     if (router.query.bookAuthor) {
       setBookAuthor(String(router.query.bookAuthor))
       if (!router.query.bookTitle) setIntentAuthor(String(router.query.bookAuthor))
@@ -53,25 +57,27 @@ export default function CreateClub() {
   // to pick from without treating the author name as a title.
   async function showAuthorBooks(author) {
     try {
-      const r = await fetch(`https://openlibrary.org/search.json?author=${encodeURIComponent(author)}&limit=6&fields=title,author_name`)
-      const d = await r.json()
-      setBkR((d.docs || []).map(x => ({ title: x.title, author: (x.author_name || [])[0] || author })))
+      const hits = await olSearch(`author:"${String(author).replace(/"/g, '')}"`)
+      setBkR(hits.slice(0, 6).map(x => ({ title: x.title, author: (x.author || '').split(', ')[0] || author, key: x.key, subjects: x.subjects || [] })))
     } catch { setBkR([]) }
   }
 
   async function searchBook(v) {
-    setBkQ(v); setBookTitle(v)
+    // Typing changes the title, so it no longer points at a picked Open Library book
+    setBkQ(v); setBookTitle(v); setBookKey(null); setBookTags([])
+    const seq = ++bkSeq.current
     if (v.length < 3) { setBkR([]); return }
     try {
-      const r = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(v)}&limit=5&fields=title,author_name`)
-      const d = await r.json()
-      setBkR((d.docs || []).map(x => ({ title: x.title, author: (x.author_name || [])[0] || '' })))
-    } catch { setBkR([]) }
+      // Shared Open Library search: English editions, carries the work ID
+      const hits = await olSearch(v)
+      if (seq !== bkSeq.current) return
+      setBkR(hits.slice(0, 6).map(x => ({ title: x.title, author: (x.author || '').split(', ')[0] || '', key: x.key, subjects: x.subjects || [] })))
+    } catch { if (seq === bkSeq.current) setBkR([]) }
   }
 
   function pickBook(b) {
     setBookTitle(b.title); setBookAuthor(b.author); setBkQ(b.title); setBkR([])
-    setBookIsbn(null); setBookKey(null); setBookSource('openlibrary'); setBookTags([])
+    setBookIsbn(null); setBookKey(b.key || null); setBookSource('openlibrary'); setBookTags(b.subjects || [])
   }
 
   async function create() {
