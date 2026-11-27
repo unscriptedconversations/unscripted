@@ -32,7 +32,7 @@ export async function getServerSideProps({ params, req }) {
     const id = String(params?.id || '')
     if (url && key && /^[0-9a-f-]{36}$/i.test(id)) {
       const sb = createClient(url, key, { auth: { persistSession: false } })
-      const { data: w } = await sb.from('writings').select('id, title, subtitle, content, is_published, member_id').eq('id', id).maybeSingle()
+      const { data: w } = await sb.from('writings').select('id, title, subtitle, content, cover_url, is_published, member_id').eq('id', id).maybeSingle()
       if (w && w.is_published) {
         const { data: m } = await sb.from('members').select('first_name, last_name').eq('id', w.member_id).maybeSingle()
         const plain = plainText(w.content).replace(/\s+/g, ' ').trim()
@@ -42,6 +42,7 @@ export async function getServerSideProps({ params, req }) {
           description: (w.subtitle || plain).slice(0, 200) + ((w.subtitle || plain).length > 200 ? '\u2026' : ''),
           author: m ? `${m.first_name || ''} ${m.last_name || ''}`.trim() : '',
           url: host ? `https://${host}/writing/${w.id}` : '',
+          image: w.cover_url && /^https:\/\//.test(w.cover_url) ? w.cover_url : '',
         }
       }
     }
@@ -83,7 +84,7 @@ export default function WritingPage({ og }) {
     setWriting(w)
     const { data: m } = await supabase.from('members').select('*').eq('id', w.member_id).single()
     if (m) setAuthor(m)
-    const { data: others } = await supabase.from('writings').select('id, title, subtitle, format, content, published_at')
+    const { data: others } = await supabase.from('writings').select('id, title, subtitle, format, content, cover_url, published_at')
       .eq('member_id', w.member_id).eq('is_published', true).neq('id', w.id).order('published_at', { ascending: false }).limit(3)
     setMore(others || [])
     loadResponses(w.id)
@@ -182,7 +183,9 @@ export default function WritingPage({ og }) {
       {og?.url && <meta property="og:url" content={og.url} />}
       {og?.author && <meta name="author" content={og.author} />}
       <meta name="description" content={og?.description || 'Writing from readers on unscripted.'} />
-      <meta name="twitter:card" content="summary" />
+      {og?.image && <meta property="og:image" content={og.image} />}
+      {og?.image && <meta name="twitter:image" content={og.image} />}
+      <meta name="twitter:card" content={og?.image ? 'summary_large_image' : 'summary'} />
       <meta name="twitter:title" content={og?.title || 'unscripted'} />
       <meta name="twitter:description" content={og?.description || 'Writing from readers on unscripted.'} />
     </Head>
@@ -211,6 +214,7 @@ export default function WritingPage({ og }) {
           </div>
         </div>
 
+        {writing.cover_url && <img src={writing.cover_url} alt="" style={{ display: 'block', width: '100%', maxHeight: 420, objectFit: 'cover', borderRadius: 14, marginBottom: 32 }} />}
         <div style={kicker}>
           {FORMAT_LABEL[writing.format] || 'Writing'}
           {club && <>{' \u00B7 '}<span style={{ cursor: 'pointer' }} onClick={() => router.push(`/club/${club.id}`)}>{club.name}</span></>}
@@ -296,11 +300,14 @@ export default function WritingPage({ og }) {
         {more.length > 0 && <div style={{ marginTop: 40 }}>
           <div style={{ fontFamily: 'var(--ui)', fontSize: 10, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'var(--txD)', marginBottom: 12 }}>More from {author?.first_name || 'this writer'}</div>
           {more.map(w => (
-            <div key={w.id} onClick={() => router.push(`/writing/${w.id}`)} style={{ padding: '16px 0', borderTop: '1px solid var(--bd)', cursor: 'pointer' }}>
+            <div key={w.id} onClick={() => router.push(`/writing/${w.id}`)} style={{ padding: '16px 0', borderTop: '1px solid var(--bd)', cursor: 'pointer', display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ ...kicker, fontSize: 9 }}>{FORMAT_LABEL[w.format] || 'Writing'}</div>
               <div style={{ fontFamily: 'var(--hd)', fontSize: 20, fontWeight: 600, color: 'var(--ink)', lineHeight: 1.25, marginTop: 4 }}>{w.title}</div>
               {w.subtitle && <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontStyle: 'italic', color: 'var(--txD)', marginTop: 2 }}>{w.subtitle}</div>}
               <div style={{ fontFamily: 'var(--ui)', fontSize: 11, color: 'var(--txD)', marginTop: 6 }}>{dateLabel(w.published_at)} {'\u00B7'} {readMinutes(plainText(w.content))} min read</div>
+              </div>
+              {w.cover_url && <img src={w.cover_url} alt="" style={{ width: 96, height: 64, objectFit: 'cover', borderRadius: 8, flexShrink: 0 }} />}
             </div>
           ))}
         </div>}
