@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import Logo from '../components/Logo'
 import { normalizeTag, normalizeTags } from '../lib/tags'
 import { olSearch } from '../lib/olSearch'
+import { isWeakPassword, weakPasswordText } from '../lib/passwordRules'
 
 // ── Interest prompt data ────────────────────────────────────────────────────
 const GOALS = [
@@ -65,7 +66,7 @@ function GoogleSignupButton({ onClick, loading }) {
     </>
   )
 }
-function explainAuthError(err) {
+function explainAuthError(err, password = '') {
   const msg = String(err?.message || '').trim()
   const low = msg.toLowerCase()
   const status = Number(err?.status) || 0
@@ -76,8 +77,8 @@ function explainAuthError(err) {
     text = 'We\u2019ve sent too many emails in a short time. Please wait a few minutes and try again.'
   } else if (err?.code === 'email_address_invalid' || (low.includes('email') && low.includes('invalid'))) {
     text = 'That email address doesn\u2019t look right. Check it and try again.'
-  } else if (err?.code === 'weak_password' || low.includes('password')) {
-    text = 'Please choose a stronger password: at least 8 characters, mixing letters and numbers.'
+  } else if (isWeakPassword(err) || low.includes('password')) {
+    text = weakPasswordText(err, password)
   } else if (err?.code === 'signup_disabled' || err?.code === 'email_provider_disabled') {
     text = 'New signups are paused right now. Please try again later.'
   } else if (status === 0 && (err?.name === 'AuthRetryableFetchError' || empty)) { // truly unreachable (no response)
@@ -361,7 +362,7 @@ export default function Signup() {
           return null
         }
         console.error('signUp failed', authErr)
-        setError(explainAuthError(authErr))
+        setError(explainAuthError(authErr, regData.password))
         return null
       }
 
