@@ -107,6 +107,14 @@ export default function Signup() {
   // clicked. awaitingEmail holds the address while we show "Check your inbox".
   const [awaitingEmail, setAwaitingEmail] = useState('')
   const [resendState, setResendState] = useState('idle') // idle | sending | sent | error
+  const [resendIn, setResendIn] = useState(0) // seconds until "Resend email" unlocks
+  // 30-second wait after the first email and after each resend
+  useEffect(() => { if (awaitingEmail) setResendIn(30) }, [awaitingEmail])
+  useEffect(() => {
+    if (resendIn <= 0) return
+    const t = setTimeout(() => setResendIn(n => n - 1), 1000)
+    return () => clearTimeout(t)
+  }, [resendIn])
 
   const [regData, setRD] = useState({
     first: '', last: '', email: '', password: '',
@@ -518,12 +526,14 @@ export default function Signup() {
 
   // ── "Check your inbox" (Confirm email ON) ──────────────────────────────────
   async function resendConfirmation() {
+    if (resendIn > 0 || resendState === 'sending') return
     setResendState('sending')
     const { error: err } = await supabase.auth.resend({
       type: 'signup', email: awaitingEmail,
       options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
     })
     setResendState(err ? 'error' : 'sent')
+    setResendIn(30)
   }
   if (awaitingEmail) {
     return (
@@ -535,14 +545,14 @@ export default function Signup() {
             We sent a link to <strong style={{ color: 'var(--ink)' }}>{awaitingEmail}</strong>. Tap it to confirm your email, and you{'\u2019'}ll pick up right where you left off.
             <br />It can take a minute. Check spam if you don{'\u2019'}t see it.
           </div>
-          <button style={{ ...btnO, width: '100%', opacity: resendState === 'sending' ? 0.5 : 1 }} disabled={resendState === 'sending'} onClick={resendConfirmation}>
-            {resendState === 'sending' ? 'Sending\u2026' : 'Resend email'}
+          <button style={{ ...btnO, width: '100%', opacity: resendState === 'sending' || resendIn > 0 ? 0.5 : 1, cursor: resendIn > 0 ? 'default' : 'pointer' }} disabled={resendState === 'sending' || resendIn > 0} onClick={resendConfirmation}>
+            {resendState === 'sending' ? 'Sending\u2026' : resendIn > 0 ? `Resend email in ${resendIn}s` : 'Resend email'}
           </button>
           {resendState === 'sent' && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--sg)', marginTop: 10 }}>Sent again.</div>}
           {resendState === 'error' && <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: '#A0603E', marginTop: 10 }}>Couldn{'\u2019'}t resend just now. Wait a minute and try again.</div>}
           <div style={{ marginTop: 20 }}>
             <button style={{ fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--txD)', background: 'none', border: 'none', cursor: 'pointer' }}
-              onClick={() => { setAwaitingEmail(''); setResendState('idle'); setRD(d => ({ ...d, password: '' })) }}>
+              onClick={() => { setAwaitingEmail(''); setResendState('idle'); setResendIn(0); setRD(d => ({ ...d, password: '' })) }}>
               Wrong email? Go back
             </button>
           </div>
