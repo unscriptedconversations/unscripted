@@ -77,6 +77,9 @@ export default function Write() {
   const [pubCount, setPubCount] = useState(0)
   const [justPublished, setJustPublished] = useState(null) // { id, title, club } after Publish
   const [aiReady, setAiReady] = useState(false)
+  const [listOpen, setListOpen] = useState(null)         // 'drafts' | 'published' | null
+  const [listItems, setListItems] = useState([])
+  const [listLoading, setListLoading] = useState(false)
   const bodyRef = useRef(null)
   const saveTimer = useRef(null)
   const inFlight = useRef(false)
@@ -355,6 +358,45 @@ export default function Write() {
   const canPublish = !!title.trim() && !!content.trim() && !overLimit
   const toWriting = () => router.push(`/profile/${currentUser.id}?tab=writing`)
 
+  // Drafts / Published dropdowns: switch pieces without leaving the editor
+  async function openList(kind) {
+    if (listOpen === kind) { setListOpen(null); return }
+    setListOpen(kind); setListLoading(true); setListItems([])
+    const { data } = await supabase.from('writings').select('id, title, updated_at, published_at')
+      .eq('member_id', currentUser.id).eq('is_published', kind === 'published')
+      .order(kind === 'published' ? 'published_at' : 'updated_at', { ascending: false }).limit(20)
+    setListItems(data || []); setListLoading(false)
+  }
+  // Save (drafts) or confirm (published edits) before switching
+  async function leaveCurrent() {
+    if (!dirty) return true
+    if (isPublished) return window.confirm('This piece has edits that aren\u2019t published. Leave without updating?')
+    if (!title.trim()) return window.confirm('This draft has no title yet, so it can\u2019t be saved. Leave anyway?')
+    clearTimeout(saveTimer.current)
+    return await persist(false)
+  }
+  async function openPiece(pid) {
+    setListOpen(null)
+    if (pid === writingId) return
+    if (!(await leaveCurrent())) return
+    setPreview(false); setPublishOpen(false); setConfirmDelete(false); setSaveError(''); setStatus('idle')
+    router.push(`/write?id=${pid}`)
+  }
+  async function newPiece() {
+    setListOpen(null)
+    if (!(await leaveCurrent())) return
+    setPreview(false); setPublishOpen(false); setConfirmDelete(false)
+    writeAnother()
+  }
+  const ago = d => {
+    if (!d) return ''
+    const s = Math.floor((Date.now() - new Date(d)) / 1000)
+    if (s < 60) return 'just now'
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`
+    return new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  }
+
   const btn = { fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: '#FFF', background: 'var(--ink)', border: 'none', borderRadius: 10, padding: '11px 20px', cursor: 'pointer' }
   const btnO = { ...btn, color: 'var(--ink)', background: 'none', border: '1.5px solid var(--bd2)', padding: '10px 18px' }
   const pill = { fontFamily: 'var(--ui)', fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--ink)', background: 'var(--sf)', border: '1.5px solid var(--bd2)', borderRadius: 100, padding: '7px 14px', cursor: 'pointer' }
@@ -419,8 +461,28 @@ export default function Write() {
       {/* Editor bar */}
       <div style={{ position: 'sticky', top: 0, zIndex: 20, background: 'var(--bg)', borderBottom: '1px solid var(--bd)' }}>
         <div style={{ maxWidth: 720, margin: '0 auto', padding: '10px 28px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <button style={pill} onClick={toWriting}>Drafts ({draftCount})</button>
-          <button style={pill} onClick={toWriting}>Published ({pubCount})</button>
+          <div style={{ position: 'relative', display: 'flex', gap: 8 }}>
+            <button style={{ ...pill, background: listOpen === 'drafts' ? 'var(--tcD)' : pill.background }} aria-expanded={listOpen === 'drafts'} onClick={() => openList('drafts')}>Drafts ({draftCount}) {'\u25BE'}</button>
+            <button style={{ ...pill, background: listOpen === 'published' ? 'var(--tcD)' : pill.background }} aria-expanded={listOpen === 'published'} onClick={() => openList('published')}>Published ({pubCount}) {'\u25BE'}</button>
+            {listOpen && <>
+              <div onClick={() => setListOpen(null)} style={{ position: 'fixed', inset: 0, zIndex: 29 }} />
+              <div role="menu" style={{ position: 'absolute', top: 'calc(100% + 8px)', left: 0, width: 300, maxWidth: '85vw', background: 'var(--sf)', border: '1px solid var(--bd2)', borderRadius: 12, boxShadow: '0 12px 32px rgba(0,0,0,0.12)', zIndex: 30, overflow: 'hidden' }}>
+                <button role="menuitem" onClick={newPiece} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '12px 16px', fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, color: 'var(--tc)', background: 'none', border: 'none', borderBottom: '1px solid var(--bd)', cursor: 'pointer' }}>+ New piece</button>
+                <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                  {listLoading && <div style={{ ...meta, padding: '12px 16px' }}>Loading{'\u2026'}</div>}
+                  {!listLoading && listItems.length === 0 && <div style={{ ...meta, padding: '12px 16px' }}>{listOpen === 'drafts' ? 'No drafts yet.' : 'Nothing published yet.'}</div>}
+                  {listItems.map(it => (
+                    <button key={it.id} role="menuitem" onClick={() => openPiece(it.id)}
+                      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 16px', background: it.id === writingId ? 'var(--tcD)' : 'none', border: 'none', borderBottom: '1px solid var(--bd)', cursor: 'pointer' }}>
+                      <div style={{ fontFamily: 'var(--hd)', fontSize: 15, fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.title || 'Untitled'}</div>
+                      <div style={{ ...meta, fontSize: 11 }}>{it.id === writingId ? 'Open now' : `${listOpen === 'drafts' ? 'Edited' : 'Published'} ${ago(listOpen === 'drafts' ? it.updated_at : it.published_at)}`}</div>
+                    </button>
+                  ))}
+                </div>
+                <button role="menuitem" onClick={() => { setListOpen(null); toWriting() }} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 16px', fontFamily: 'var(--ui)', fontSize: 12, fontWeight: 600, color: 'var(--txD)', background: 'none', border: 'none', cursor: 'pointer' }}>See all on your profile {'\u2192'}</button>
+              </div>
+            </>}
+          </div>
           <div role="status" aria-live="polite" style={{ ...meta, marginLeft: 'auto', color: status === 'error' ? '#A0603E' : 'var(--txD)' }}>{statusText}</div>
           {!isPublished && dirty && title.trim() && status !== 'saving' && <button style={{ ...btnO, padding: '8px 14px' }} onClick={() => persist(false)}>Save</button>}
           <button style={{ ...btn, background: 'var(--tc)', opacity: canPublish ? 1 : 0.4 }} disabled={!canPublish || status === 'saving'}
