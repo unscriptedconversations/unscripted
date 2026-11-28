@@ -554,6 +554,27 @@ export default function ProfilePage() {
             </button>
           </div>
 
+          {/* New-piece emails from writers you follow (pages/api/writing-email.js); this opts out */}
+          <div style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '20px 22px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 13, fontWeight: 700, color: 'var(--ink)', marginBottom: 4 }}>New pieces from writers you follow</div>
+              <div style={{ fontFamily: 'var(--ui)', fontSize: 12, color: 'var(--txD)', lineHeight: 1.5 }}>
+                {member.writing_email_opt_out
+                  ? 'Off. You won\u2019t get emails when writers you follow publish. Their pieces still appear in Writing.'
+                  : 'On. You\u2019ll get an email when a writer you follow publishes a new piece.'}
+              </div>
+            </div>
+            <Switch on={!member.writing_email_opt_out} label="Emails about new pieces from writers you follow" disabled={acctBusy === 'writingEmail'}
+              onToggle={async () => {
+                const next = !member.writing_email_opt_out
+                setAcctBusy('writingEmail')
+                const { error } = await supabase.from('members').update({ writing_email_opt_out: next }).eq('id', member.id)
+                setAcctBusy('')
+                if (error) { window.alert('Couldn\u2019t save that. Please try again.'); return }
+                setMember(m => ({ ...m, writing_email_opt_out: next }))
+              }} />
+          </div>
+
           <div style={{ fontFamily: 'var(--ui)', fontSize: 9, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase', color: '#A0603E', margin: '28px 0 14px', paddingBottom: 10, borderBottom: '1px solid rgba(160,96,62,0.2)' }}>Danger Zone</div>
 
           <div style={{ background: 'var(--sf)', border: '1px solid var(--bd)', borderRadius: 14, padding: '20px 22px', marginBottom: 12 }}>
