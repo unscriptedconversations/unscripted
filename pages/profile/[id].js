@@ -10,6 +10,7 @@ import PinnedPapers from '../../components/PinnedPapers'
 import { createNotification } from '../../lib/notify'
 import { olSearch } from '../../lib/olSearch'
 import { plainText } from '../../lib/formatText'
+import { isWeakPassword, weakPasswordText } from '../../lib/passwordRules'
 
 const COLORS = ['#8B6E52', '#5E7A62', '#C27A5A', '#6B6590', '#52708B', '#7A5278', '#8B7E52', '#8B5E5E', '#8B6E6E']
 
@@ -46,14 +47,14 @@ function Switch({ on, onToggle, label, disabled }) {
 }
 
 // Plain-language versions of Supabase auth errors for the Account tab.
-function accountAuthError(err) {
+function accountAuthError(err, password = '') {
   const code = err?.code || ''
   const low = (err?.message || '').toLowerCase()
   if (code === 'email_exists' || low.includes('already been registered')) return 'That email is already used by another account.'
   if (code === 'email_address_invalid' || low.includes('invalid format')) return 'That doesn’t look like a valid email address.'
   if (code === 'over_email_send_rate_limit' || code === 'over_request_rate_limit' || low.includes('rate limit')) return 'Too many tries in a short time. Please wait a few minutes and try again.'
   if (code === 'same_password') return 'Your new password needs to be different from your current one.'
-  if (code === 'weak_password') return 'That password is too easy to guess. Try a longer one.'
+  if (isWeakPassword(err)) return weakPasswordText(err, password)
   if (code === 'reauthentication_needed' || code === 'reauthentication_not_valid') return 'For your security, log out and log back in, then try again.'
   return 'Something went wrong. Please try again.' + (code ? ` (Error code: ${code})` : '')
 }
@@ -323,7 +324,7 @@ export default function ProfilePage() {
     }
     const { data, error } = await supabase.auth.updateUser({ password: next, data: { has_password: true } })
     setAcctBusy('')
-    if (error) { setPwMsg({ ok: false, text: accountAuthError(error) }); return }
+    if (error) { setPwMsg({ ok: false, text: accountAuthError(error, next) }); return }
     if (data?.user) setAuthUser(data.user)
     setPwForm({ current: '', next: '', confirm: '' })
     setPwMsg({ ok: true, text: hasPassword ? 'Password updated.' : `Password set. You can now also log in with ${authUser.email} and this password.` })
