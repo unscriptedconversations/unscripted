@@ -149,7 +149,8 @@ export default function BookPage() {
   }
 
   async function startClub() {
-    const q = `bookTitle=${encodeURIComponent(book.title)}&bookAuthor=${encodeURIComponent(book.author || '')}`
+    // Carry the Open Library ID so the new club's book is linked to the catalog
+    const q = `bookTitle=${encodeURIComponent(book.title)}&bookAuthor=${encodeURIComponent(book.author || '')}` + (bookKey ? `&bookKey=${encodeURIComponent(bookKey)}` : '')
     const { data: { session } } = await supabase.auth.getSession()
     router.push(session ? `/create?${q}` : `/signup?${q}`)
   }
